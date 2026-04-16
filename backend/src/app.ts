@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser'
 import bcrypt from 'bcryptjs'
 import authRouter from './routes/auth.routes'
 import productsRouter from './routes/products.routes'
+import categoriesRouter from './routes/categories.routes'
 import { prisma } from './lib/prisma'
 
 const app = express()
@@ -20,6 +21,7 @@ app.use(express.json())
 
 app.use('/auth', authRouter)
 app.use('/products', productsRouter)
+app.use('/categories', categoriesRouter)
 
 app.get('/seed-user', async (_req, res) => {
   try {

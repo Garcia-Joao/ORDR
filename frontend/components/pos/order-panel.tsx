@@ -1,6 +1,6 @@
 'use client'
 
-import { Minus, Plus, Trash2, CreditCard, Receipt, X } from 'lucide-react'
+import { Minus, Plus, Trash2, CreditCard, Receipt, X, Printer } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { OrderItem } from '@/lib/pos-types'
 import { formatBRL, getItemPrice } from '@/lib/pos-types'
@@ -209,8 +209,8 @@ export function OrderPanel({
           disabled={items.length === 0 || comanda === null}
           className="w-full h-14 text-lg font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <CreditCard className="h-5 w-5 mr-2" />
-          Cobrar {formatBRL(total)}
+          <Printer className="h-5 w-5 mr-2" />
+          Imprimir
         </Button>
 
         {items.length > 0 && comanda === null && (

@@ -20,7 +20,7 @@ type VariationGroupInput = {
 
 type CreateProductInput = {
   companyId: string
-  categoryId?: string | null
+  categoryId: string
   name: string
   description?: string | null
   emoji?: string | null
@@ -134,14 +134,16 @@ export async function getProductById(productId: string, companyId: string) {
 }
 
 export async function createProduct(data: CreateProductInput) {
-  if (data.categoryId) {
-    await ensureCategoryBelongsToCompany(data.categoryId, data.companyId)
+  if (!data.categoryId) {
+    throw new Error('CATEGORY_REQUIRED')
   }
+
+  await ensureCategoryBelongsToCompany(data.categoryId, data.companyId)
 
   const product = await prisma.product.create({
     data: {
       companyId: data.companyId,
-      categoryId: data.categoryId ?? null,
+      categoryId: data.categoryId,
       name: data.name,
       description: data.description ?? null,
       emoji: data.emoji ?? null,
@@ -167,17 +169,11 @@ export async function createProduct(data: CreateProductInput) {
     include: {
       category: true,
       variationGroups: {
-        orderBy: {
-          sortOrder: 'asc',
-        },
+        orderBy: { sortOrder: 'asc' },
         include: {
           options: {
-            where: {
-              active: true,
-            },
-            orderBy: {
-              sortOrder: 'asc',
-            },
+            where: { active: true },
+            orderBy: { sortOrder: 'asc' },
           },
         },
       },
@@ -203,9 +199,13 @@ export async function updateProduct(
     throw new Error('PRODUCT_NOT_FOUND')
   }
 
-  if (data.categoryId) {
-    await ensureCategoryBelongsToCompany(data.categoryId, companyId)
+if (data.categoryId !== undefined) {
+  if (!data.categoryId) {
+    throw new Error('CATEGORY_REQUIRED')
   }
+
+  await ensureCategoryBelongsToCompany(data.categoryId, companyId)
+}
 
   if (data.variationGroups) {
     await prisma.productVariationGroup.deleteMany({
@@ -287,13 +287,8 @@ export async function deleteProduct(productId: string, companyId: string) {
     throw new Error('PRODUCT_NOT_FOUND')
   }
 
-  await prisma.product.update({
-    where: {
-      id: productId,
-    },
-    data: {
-      active: false,
-    },
+  await prisma.product.delete({
+    where: { id: productId },
   })
 
   return { ok: true }

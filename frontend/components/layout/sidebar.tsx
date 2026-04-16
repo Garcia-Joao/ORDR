@@ -12,12 +12,14 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
 } from 'lucide-react'
 import { useState } from 'react'
 
 const navItems = [
-  { href: '/', icon: ShoppingCart, label: 'PDV', description: 'Ponto de Venda' },
+  { href: '/PDV', icon: ShoppingCart, label: 'PDV', description: 'Ponto de Venda' },
   { href: '/produtos', icon: Package, label: 'Produtos', description: 'Gerenciar cardápio' },
+  { href: '/pedidos', icon: ClipboardList, label: 'Pedidos', description: 'Visualizar Pedidos' },
   { href: '/clientes', icon: Users, label: 'Clientes', description: 'Cadastro de clientes' },
   { href: '/relatorios', icon: BarChart3, label: 'Relatórios', description: 'Vendas e análises' },
   { href: '/impressoras', icon: Printer, label: 'Impressoras', description: 'Configurar impressoras' },
@@ -37,13 +39,13 @@ export function Sidebar() {
       {/* Logo */}
       <div className="flex items-center justify-between px-4 py-5 border-b border-sidebar-border">
         {!collapsed && (
-          <Link href="/" className="flex items-center gap-2">
+          <Link href="/PDV" className="flex items-center gap-2">
             <span className="text-xl font-bold text-sidebar-primary">Ordr</span>
             <span className="text-xs text-sidebar-foreground/60 font-medium">POS</span>
           </Link>
         )}
         {collapsed && (
-          <Link href="/" className="mx-auto">
+          <Link href="/PDV" className="mx-auto">
             <span className="text-xl font-bold text-sidebar-primary">O</span>
           </Link>
         )}

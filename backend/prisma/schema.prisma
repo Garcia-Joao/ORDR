@@ -49,19 +49,18 @@ model User {
 }
 
 model Category {
-  id         String    @id @default(cuid())
-  companyId  String
-  name       String
-  slug       String?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  slug      String?
+  emoji     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  products   Product[]
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products Product[]
 
   @@index([companyId])
-  @@unique([companyId, name])
-  @@unique([companyId, slug])
 }
 
 model Product {

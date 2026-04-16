@@ -3,13 +3,18 @@
 import { useState, useEffect } from 'react'
 import { Plus, Search, Pencil, Trash2, Package, Tag, X, ChevronRight, GripVertical } from 'lucide-react'
 import {
-  DEFAULT_PRODUCTS,
-  DEFAULT_CATEGORIES,
   type Product,
   type ProductVariationGroup,
   type ProductVariationOption,
   type CategoryConfig,
 } from '@/lib/pos-types'
+import { createProduct, deleteProduct, getProducts, updateProduct } from '@/lib/api/products'
+import {
+  createCategory,
+  deleteCategory,
+  getCategories,
+  updateCategory,
+} from '@/lib/api/categories'
 
 function formatCurrency(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -18,47 +23,48 @@ function formatCurrency(value: number): string {
 export default function ProdutosPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | 'all'>('all')
-  const [categories, setCategories] = useState<CategoryConfig[]>(DEFAULT_CATEGORIES)
-  const [products, setProducts] = useState<Product[]>(DEFAULT_PRODUCTS)
+  const [categories, setCategories] = useState<CategoryConfig[]>([])
+  const [products, setProducts] = useState<Product[]>([])
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [isProductModalOpen, setIsProductModalOpen] = useState(false)
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<CategoryConfig | null>(null)
   const [activeTab, setActiveTab] = useState<'products' | 'categories'>('products')
+  const [isLoading, setIsLoading] = useState(true)
 
-  // Load from localStorage on mount
   useEffect(() => {
-    const savedCategories = localStorage.getItem('ordr-categories')
-    const savedProducts = localStorage.getItem('ordr-products')
-    if (savedCategories) {
+    async function loadData() {
       try {
-        setCategories(JSON.parse(savedCategories))
-      } catch {}
+        const [productsData, categoriesData] = await Promise.all([
+          getProducts(),
+          getCategories(),
+        ])
+
+        setProducts(productsData)
+        setCategories(categoriesData)
+      } catch (error) {
+        console.error('Erro ao carregar dados:', error)
+      } finally {
+        setIsLoading(false)
+      }
     }
-    if (savedProducts) {
-      try {
-        setProducts(JSON.parse(savedProducts))
-      } catch {}
-    }
+
+    loadData()
   }, [])
-
-  // Save to localStorage on change
-  useEffect(() => {
-    localStorage.setItem('ordr-categories', JSON.stringify(categories))
-  }, [categories])
-
-  useEffect(() => {
-    localStorage.setItem('ordr-products', JSON.stringify(products))
-  }, [products])
 
   const filteredProducts = products.filter((product) => {
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesCategory = selectedCategory === 'all' || product.category === selectedCategory
+    const matchesCategory = selectedCategory === 'all' || product.categoryId === selectedCategory
     return matchesSearch && matchesCategory
   })
 
-  const handleDeleteProduct = (productId: string) => {
-    setProducts((prev) => prev.filter((p) => p.id !== productId))
+  const handleDeleteProduct = async (productId: string) => {
+    try {
+      await deleteProduct(productId)
+      setProducts((prev) => prev.filter((p) => p.id !== productId))
+    } catch (error) {
+      console.error('Erro ao excluir produto:', error)
+    }
   }
 
   const handleEditProduct = (product: Product) => {
@@ -71,26 +77,36 @@ export default function ProdutosPage() {
     setIsProductModalOpen(true)
   }
 
-  const handleSaveProduct = (productData: Omit<Product, 'id'>) => {
-    if (editingProduct) {
-      setProducts((prev) =>
-        prev.map((p) => (p.id === editingProduct.id ? { ...productData, id: editingProduct.id } : p))
-      )
-    } else {
-      const newProduct: Product = {
-        ...productData,
-        id: Math.random().toString(36).substring(2, 9),
+  const handleSaveProduct = async (productData: Omit<Product, 'id'>) => {
+    try {
+      if (editingProduct) {
+        const updated = await updateProduct(editingProduct.id, productData)
+        setProducts((prev) =>
+          prev.map((p) => (p.id === editingProduct.id ? updated : p))
+        )
+      } else {
+        const created = await createProduct(productData)
+        setProducts((prev) => [...prev, created])
       }
-      setProducts((prev) => [...prev, newProduct])
+
+      setIsProductModalOpen(false)
+      setEditingProduct(null)
+    } catch (error) {
+      console.error('Erro ao salvar produto:', error)
     }
-    setIsProductModalOpen(false)
-    setEditingProduct(null)
   }
 
-  const handleDeleteCategory = (categoryId: string) => {
-    // Remove category and update products in that category
-    setCategories((prev) => prev.filter((c) => c.id !== categoryId))
-    setProducts((prev) => prev.map((p) => p.category === categoryId ? { ...p, category: 'uncategorized' } : p))
+  const handleDeleteCategory = async (categoryId: string) => {
+    try {
+      await deleteCategory(categoryId)
+      setCategories((prev) => prev.filter((c) => c.id !== categoryId))
+
+      if (selectedCategory === categoryId) {
+        setSelectedCategory('all')
+      }
+    } catch (error) {
+      console.error('Erro ao excluir categoria:', error)
+    }
   }
 
   const handleEditCategory = (category: CategoryConfig) => {
@@ -103,25 +119,35 @@ export default function ProdutosPage() {
     setIsCategoryModalOpen(true)
   }
 
-  const handleSaveCategory = (categoryData: Omit<CategoryConfig, 'id'>) => {
-    if (editingCategory) {
-      setCategories((prev) =>
-        prev.map((c) => (c.id === editingCategory.id ? { ...categoryData, id: editingCategory.id } : c))
-      )
-    } else {
-      const newCategory: CategoryConfig = {
-        ...categoryData,
-        id: categoryData.name.toLowerCase().replace(/\s+/g, '-'),
+  const handleSaveCategory = async (categoryData: Omit<CategoryConfig, 'id'>) => {
+    try {
+      if (editingCategory) {
+        const updated = await updateCategory(editingCategory.id, categoryData)
+        setCategories((prev) =>
+          prev.map((c) => (c.id === editingCategory.id ? updated : c))
+        )
+      } else {
+        const created = await createCategory(categoryData)
+        setCategories((prev) => [...prev, created])
       }
-      setCategories((prev) => [...prev, newCategory])
+
+      setIsCategoryModalOpen(false)
+      setEditingCategory(null)
+    } catch (error) {
+      console.error('Erro ao salvar categoria:', error)
     }
-    setIsCategoryModalOpen(false)
-    setEditingCategory(null)
+  }
+
+  if (isLoading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <span className="text-muted-foreground">Carregando...</span>
+      </div>
+    )
   }
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card">
         <div className="flex items-center gap-3">
           <Package className="h-6 w-6 text-primary" />
@@ -154,9 +180,7 @@ export default function ProdutosPage() {
 
       {activeTab === 'products' ? (
         <>
-          {/* Filters */}
           <div className="flex items-center gap-4 px-6 py-4 border-b border-border bg-card/50">
-            {/* Search */}
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <input
@@ -168,7 +192,6 @@ export default function ProdutosPage() {
               />
             </div>
 
-            {/* Category Filter */}
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setSelectedCategory('all')}
@@ -204,7 +227,6 @@ export default function ProdutosPage() {
             </button>
           </div>
 
-          {/* Products Table */}
           <div className="flex-1 overflow-y-auto p-6">
             <div className="bg-card rounded-lg border border-border overflow-hidden">
               <table className="w-full">
@@ -228,24 +250,24 @@ export default function ProdutosPage() {
                       </td>
                       <td className="px-6 py-4">
                         <span className="px-3 py-1 bg-secondary rounded-full text-xs font-medium text-secondary-foreground">
-                          {categories.find((c) => c.id === product.category)?.name || product.category}
+                          {categories.find((c) => c.id === product.categoryId)?.name || '-'}
                         </span>
                       </td>
-                        <td className="px-6 py-4">
-                          {product.variationGroups && product.variationGroups.length > 0 ? (
-                            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                              <ChevronRight className="h-4 w-4" />
-                              <span>{product.variationGroups.length} grupos</span>
-                              {product.variationGroups.some((g) => g.required) && (
-                                <span className="ml-1 px-1.5 py-0.5 bg-warning/20 text-warning text-xs rounded">
-                                  obrigatorio
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-sm text-muted-foreground">-</span>
-                          )}
-                        </td>
+                      <td className="px-6 py-4">
+                        {product.variationGroups && product.variationGroups.length > 0 ? (
+                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                            <ChevronRight className="h-4 w-4" />
+                            <span>{product.variationGroups.length} grupos</span>
+                            {product.variationGroups.some((g) => g.required) && (
+                              <span className="ml-1 px-1.5 py-0.5 bg-warning/20 text-warning text-xs rounded">
+                                obrigatorio
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        )}
+                      </td>
                       <td className="px-6 py-4 text-right">
                         <span className="font-mono text-foreground">{formatCurrency(product.price)}</span>
                       </td>
@@ -282,7 +304,6 @@ export default function ProdutosPage() {
         </>
       ) : (
         <>
-          {/* Categories Management */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card/50">
             <p className="text-sm text-muted-foreground">
               {categories.length} categoria{categories.length !== 1 ? 's' : ''}
@@ -299,7 +320,8 @@ export default function ProdutosPage() {
           <div className="flex-1 overflow-y-auto p-6">
             <div className="grid grid-cols-3 gap-4">
               {categories.map((category) => {
-                const productCount = products.filter((p) => p.category === category.id).length
+                const productCount = products.filter((p) => p.categoryId === category.id).length
+
                 return (
                   <div
                     key={category.id}
@@ -339,7 +361,6 @@ export default function ProdutosPage() {
         </>
       )}
 
-      {/* Product Modal */}
       {isProductModalOpen && (
         <ProductModal
           product={editingProduct}
@@ -352,7 +373,6 @@ export default function ProdutosPage() {
         />
       )}
 
-      {/* Category Modal */}
       {isCategoryModalOpen && (
         <CategoryModal
           category={editingCategory}
@@ -380,7 +400,7 @@ function ProductModal({
 }) {
   const [name, setName] = useState(product?.name || '')
   const [price, setPrice] = useState(product?.price.toString() || '')
-  const [category, setCategory] = useState(product?.category || categories[0]?.id || '')
+  const [categoryId, setCategoryId] = useState(product?.categoryId || '')
   const [emoji, setEmoji] = useState(product?.emoji || '📦')
   const [variationGroups, setVariationGroups] = useState<ProductVariationGroup[]>(
     product?.variationGroups || []
@@ -454,7 +474,7 @@ function ProductModal({
     onSave({
       name,
       price: parseFloat(price) || 0,
-      category,
+      categoryId,
       emoji,
       variationGroups: variationGroups.length > 0 ? variationGroups : undefined,
     })
@@ -515,10 +535,14 @@ function ProductModal({
             <div className="flex-1">
               <label className="block text-sm font-medium text-foreground mb-2">Categoria</label>
               <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
                 className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground"
+                required
               >
+                <option value="" disabled>
+                  Selecione uma categoria
+                </option>
                 {categories.map((cat) => (
                   <option key={cat.id} value={cat.id}>
                     {cat.emoji} {cat.name}

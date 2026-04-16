@@ -1,9 +1,6 @@
-const API_URL = 'http://localhost:3000'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
 
-export async function apiFetch<T>(
-  path: string,
-  options?: RequestInit
-): Promise<T> {
+export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     credentials: 'include',
     headers: {
@@ -17,12 +14,16 @@ export async function apiFetch<T>(
 
   try {
     data = await response.json()
-  } catch {
-    data = null
-  }
+  } catch {}
 
   if (!response.ok) {
-    throw new Error(data?.error || 'Erro na requisição')
+    console.error('API error', {
+      path,
+      status: response.status,
+      data,
+    })
+
+    throw new Error(data?.error || `Erro na requisição (${response.status})`)
   }
 
   return data as T

@@ -15,7 +15,7 @@ export default function LoginPage() {
 const handleLogin = async () => {
   try {
     await login(username, password)
-    router.push('/')
+    router.push('/PDV')
   } catch (err) {
     setError('Usuário ou senha inválidos')
   }

@@ -26,7 +26,7 @@ export function ProductGrid({ category, products, onAddProduct }: ProductGridPro
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [groupSelections, setGroupSelections] = useState<SelectionState>({})
 
-  const filteredProducts = products.filter((p) => p.category === category)
+  const filteredProducts = products.filter((p) => p.categoryId === category)
 
   const variationGroups = selectedProduct?.variationGroups ?? []
 
@@ -293,11 +293,6 @@ const getProjectedTotal = (
                             <span className="font-medium text-foreground">
                               {option.name}
                             </span>
-                            <p className="text-xs text-muted-foreground">
-                              {group.selectionType === 'single'
-                                ? 'Seleciona apenas esta opcao'
-                                : 'Pode combinar com outras'}
-                            </p>
                           </div>
 
                           <div className="text-right">

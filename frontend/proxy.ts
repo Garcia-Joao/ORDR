@@ -6,18 +6,21 @@ export function proxy(request: NextRequest) {
   const isLoggedIn = Boolean(authCookie)
   const { pathname } = request.nextUrl
 
-  console.log('PATH:', pathname)
-  console.log('AUTH COOKIE:', authCookie)
+  const protectedRoutes = [
+    '/PDV',
+    '/pedidos',
+    '/produtos',
+    '/clientes',
+    '/relatorios',
+    '/dispositivos',
+  ]
 
-  const protectedRoutes = ['/', '/produtos', '/clientes', '/relatorios', '/dispositivos']
-
-  const isProtectedRoute = protectedRoutes.some((route) => {
-    if (route === '/') return pathname === '/'
-    return pathname.startsWith(route)
-  })
+  const isProtectedRoute = protectedRoutes.some((route) =>
+    pathname.startsWith(route)
+  )
 
   if (pathname === '/login' && isLoggedIn) {
-    return NextResponse.redirect(new URL('/', request.url))
+    return NextResponse.redirect(new URL('/PDV', request.url))
   }
 
   if (isProtectedRoute && !isLoggedIn) {
@@ -29,7 +32,8 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/',
+    '/PDV/:path*',
+    '/pedidos/:path*',
     '/login',
     '/produtos/:path*',
     '/clientes/:path*',

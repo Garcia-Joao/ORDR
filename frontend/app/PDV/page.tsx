@@ -17,7 +17,7 @@ import type {
 } from '@/lib/pos-types'
 import { generateSampleOrders, DEFAULT_PRODUCTS, DEFAULT_CATEGORIES, getItemPrice } from '@/lib/pos-types'
 
-import { createOrder } from '@/lib/api'
+import { createOrder, getCategories, getProducts } from '@/lib/api'
 import { login } from '@/lib/api'
 import { logout } from '@/lib/api'
 
@@ -59,9 +59,9 @@ export default function POSPage() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
   const [currentUser, setCurrentUser] = useState<string | null>(null)
-  const [categories, setCategories] = useState<CategoryConfig[]>(DEFAULT_CATEGORIES)
-  const [products, setProducts] = useState<Product[]>(DEFAULT_PRODUCTS)
-  const [selectedCategory, setSelectedCategory] = useState<string>(categories[0]?.id || 'drinks')
+  const [categories, setCategories] = useState<CategoryConfig[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [currentOrderItems, setCurrentOrderItems] = useState<OrderItem[]>([])
   const [currentOrderId, setCurrentOrderId] = useState<string | null>(null)
   const [currentComanda, setCurrentComanda] = useState<number | null>(null)
@@ -110,21 +110,42 @@ export default function POSPage() {
     setOrders(generateSampleOrders())
   }, [])
 
-  // Sync categories/products from localStorage if available (shared with produtos page)
   useEffect(() => {
-    const savedCategories = localStorage.getItem('ordr-categories')
-    const savedProducts = localStorage.getItem('ordr-products')
-    if (savedCategories) {
+    async function loadData() {
       try {
-        setCategories(JSON.parse(savedCategories))
-      } catch {}
+        const [productsData, categoriesData] = await Promise.all([
+          getProducts(),
+          getCategories(),
+        ])
+
+        setProducts(productsData)
+        setCategories(categoriesData)
+
+        if (categoriesData.length > 0) {
+          setSelectedCategory(categoriesData[0].id)
+        }
+      } catch (error) {
+        console.error('Erro ao carregar dados:', error)
+      } finally {
+        setIsLoading(false)
+      }
     }
-    if (savedProducts) {
-      try {
-        setProducts(JSON.parse(savedProducts))
-      } catch {}
-    }
+
+    loadData()
   }, [])
+
+    useEffect(() => {
+    if (categories.length === 0) {
+      setSelectedCategory('')
+      return
+    }
+
+    const categoryStillExists = categories.some((cat) => cat.id === selectedCategory)
+
+    if (!categoryStillExists) {
+      setSelectedCategory(categories[0].id)
+    }
+  }, [categories, selectedCategory])
 
 const handleAddProduct = useCallback(
   (product: Product, variationSelections?: OrderItemVariationSelection[]) => {
@@ -254,12 +275,11 @@ const handleLogout = useCallback(async () => {
     setCurrentOrderId(generateOrderId())
     setCurrentComanda(null)
 
-    router.push('/login')
-    router.refresh()
+    window.location.href = '/login'
   } catch (error) {
     console.error('Erro ao deslogar:', error)
   }
-}, [router])
+}, [])
 
   // Show loading while checking auth
   if (isLoading) {
@@ -346,11 +366,17 @@ const handleLogout = useCallback(async () => {
               )}
             </button>
             <div className="flex-1 min-w-0">
-              <CategoryTabs
-                categories={categories}
-                selected={selectedCategory}
-                onSelect={setSelectedCategory}
-              />
+              {categories.length > 0 ? (
+                <CategoryTabs
+                  categories={categories}
+                  selected={selectedCategory}
+                  onSelect={setSelectedCategory}
+                />
+              ) : (
+                <div className="px-5 py-4 text-sm text-muted-foreground">
+                  Nenhuma categoria cadastrada
+                </div>
+              )}
             </div>
           </div>
 

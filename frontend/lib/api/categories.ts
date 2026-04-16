@@ -7,6 +7,12 @@ export function getCategories() {
   })
 }
 
+export function getCategoryById(id: string) {
+  return apiFetch<CategoryConfig>(`/categories/${id}`, {
+    method: 'GET',
+  })
+}
+
 export function createCategory(data: Omit<CategoryConfig, 'id'>) {
   return apiFetch<CategoryConfig>('/categories', {
     method: 'POST',

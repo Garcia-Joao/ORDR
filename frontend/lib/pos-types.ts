@@ -15,9 +15,11 @@ export interface ProductVariationGroup {
 export interface Product {
   id: string
   name: string
+  description?: string | null
   price: number
-  category: string
-  emoji: string
+  categoryId?: string | null
+  emoji?: string | null
+  active?: boolean
   variationGroups?: ProductVariationGroup[]
 }
 

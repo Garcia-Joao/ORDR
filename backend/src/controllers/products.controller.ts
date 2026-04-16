@@ -71,6 +71,10 @@ export async function createProduct(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: 'Category not found' })
     }
 
+    if (error?.message === 'CATEGORY_REQUIRED') {
+      return res.status(400).json({ error: 'Category is required' })
+    }
+
     return res.status(500).json({ error: 'Failed to create product' })
   }
 }
