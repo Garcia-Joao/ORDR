@@ -16,14 +16,38 @@ interface OrderPanelProps {
   onSetComanda: (comanda: number | null) => void
 }
 
-// Generate unique key for order item (product + variation combo)
+// Same key logic used in POSPage
 function getItemKey(item: OrderItem): string {
-  if (item.selectedVariations && item.selectedVariations.length > 0) {
-    return `${item.product.id}-${item.selectedVariations.map(v => v.id).join('-')}`
+  const selections = (item.variationSelections ?? [])
+    .map((selection) => ({
+      groupId: selection.groupId,
+      selectedOptionIds: [...selection.selectedOptionIds].sort(),
+    }))
+    .sort((a, b) => a.groupId.localeCompare(b.groupId))
+
+  const selectionKey = JSON.stringify(selections)
+  return `${item.product.id}-${selectionKey}`
+}
+
+function getVariationLabels(item: OrderItem): string[] {
+  if (!item.variationSelections?.length || !item.product.variationGroups?.length) {
+    return []
   }
-  return item.selectedVariation 
-    ? `${item.product.id}-${item.selectedVariation.id}` 
-    : item.product.id
+
+  return item.variationSelections.flatMap((selection) => {
+    const group = item.product.variationGroups?.find(
+      (group) => group.id === selection.groupId
+    )
+
+    if (!group) return []
+
+    return selection.selectedOptionIds
+      .map((optionId) => {
+        const option = group.options.find((option) => option.id === optionId)
+        return option ? `${group.name}: ${option.name}` : null
+      })
+      .filter((value): value is string => value !== null)
+  })
 }
 
 export function OrderPanel({
@@ -36,13 +60,15 @@ export function OrderPanel({
   onCharge,
   onSetComanda,
 }: OrderPanelProps) {
-  const subtotal = items.reduce((sum, item) => sum + getItemPrice(item) * item.quantity, 0)
+  const subtotal = items.reduce(
+    (sum, item) => sum + getItemPrice(item) * item.quantity,
+    0
+  )
   const tax = subtotal * 0.08
   const total = subtotal + tax
 
   return (
     <div className="w-95 flex flex-col bg-card border-l border-border">
-      {/* Order Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-border">
         <div>
           <h2 className="text-lg font-semibold text-foreground">Pedido Atual</h2>
@@ -65,7 +91,6 @@ export function OrderPanel({
         )}
       </div>
 
-      {/* Comanda Input */}
       <div className="px-5 py-3 border-b border-border bg-secondary/50">
         <label className="block text-xs font-medium text-muted-foreground mb-1.5">
           Comanda
@@ -86,7 +111,6 @@ export function OrderPanel({
         </div>
       </div>
 
-      {/* Order Items */}
       <div className="flex-1 overflow-y-auto p-4">
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -99,37 +123,38 @@ export function OrderPanel({
             {items.map((item) => {
               const itemKey = getItemKey(item)
               const itemPrice = getItemPrice(item)
-              const selectedVars = item.selectedVariations
-              const hasMultipleVariations = selectedVars && selectedVars.length > 0
-              const variationModifier = hasMultipleVariations
-                ? selectedVars.reduce((sum, v) => sum + (v.priceModifier ?? 0), 0)
-                : item.selectedVariation?.priceModifier ?? 0
-              
+              const variationLabels = getVariationLabels(item)
+
               return (
                 <div
                   key={itemKey}
                   className="flex items-center gap-3 p-3 bg-secondary rounded-lg"
                 >
                   <span className="text-2xl">{item.product.emoji}</span>
+
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">
                       {item.product.name}
                     </p>
-                    {hasMultipleVariations && selectedVars && (
-                      <p className="text-xs text-muted-foreground">
-                        {selectedVars.map(v => v.name).join(', ')}
-                      </p>
+
+                    {variationLabels.length > 0 && (
+                      <div className="mt-1 space-y-0.5">
+                        {variationLabels.map((label, index) => (
+                          <p
+                            key={`${itemKey}-variation-${index}`}
+                            className="text-xs text-muted-foreground"
+                          >
+                            {label}
+                          </p>
+                        ))}
+                      </div>
                     )}
-                    {item.selectedVariation && !hasMultipleVariations && (
-                      <p className="text-xs text-muted-foreground">
-                        {item.selectedVariation.name}
-                        {variationModifier > 0 && ` (+${formatBRL(variationModifier)})`}
-                      </p>
-                    )}
+
                     <p className="text-sm text-primary font-semibold">
                       {formatBRL(itemPrice * item.quantity)}
                     </p>
                   </div>
+
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => onUpdateQuantity(itemKey, -1)}
@@ -137,15 +162,18 @@ export function OrderPanel({
                     >
                       <Minus className="h-4 w-4" />
                     </button>
+
                     <span className="w-8 text-center text-sm font-semibold text-foreground">
                       {item.quantity}
                     </span>
+
                     <button
                       onClick={() => onUpdateQuantity(itemKey, 1)}
                       className="h-8 w-8 flex items-center justify-center rounded-md bg-muted hover:bg-muted/80 text-foreground transition-colors"
                     >
                       <Plus className="h-4 w-4" />
                     </button>
+
                     <button
                       onClick={() => onRemoveItem(itemKey)}
                       className="h-8 w-8 flex items-center justify-center rounded-md text-destructive hover:bg-destructive/20 transition-colors ml-1"
@@ -160,7 +188,6 @@ export function OrderPanel({
         )}
       </div>
 
-      {/* Order Summary */}
       <div className="border-t border-border p-5 space-y-3">
         <div className="flex justify-between text-sm text-muted-foreground">
           <span>Subtotal</span>
@@ -176,7 +203,6 @@ export function OrderPanel({
         </div>
       </div>
 
-      {/* Charge Button */}
       <div className="p-5 pt-0">
         <Button
           onClick={onCharge}
@@ -186,6 +212,7 @@ export function OrderPanel({
           <CreditCard className="h-5 w-5 mr-2" />
           Cobrar {formatBRL(total)}
         </Button>
+
         {items.length > 0 && comanda === null && (
           <p className="text-xs text-center text-warning mt-2">
             Informe o numero da comanda

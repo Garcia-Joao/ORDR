@@ -4,22 +4,22 @@ import { useState } from 'react'
 import { Lock, User } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
+import { login } from '@/lib/api'
+
 export default function LoginPage() {
   const router = useRouter()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!username.trim() || !password.trim()) {
-      setError('Preencha usuario e senha')
-      return
-    }
-    // Store user in localStorage for persistence
-    localStorage.setItem('ordr-user', username)
+const handleLogin = async () => {
+  try {
+    await login(username, password)
     router.push('/')
+  } catch (err) {
+    setError('Usuário ou senha inválidos')
   }
+}
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
@@ -29,7 +29,10 @@ export default function LoginPage() {
           <p className="text-muted-foreground">Ponto de Venda</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={(e) => {
+                                e.preventDefault()
+                                handleLogin()
+                              }}>
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">Usuario</label>
             <div className="relative">

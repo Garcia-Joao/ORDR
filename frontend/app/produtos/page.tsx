@@ -2,7 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import { Plus, Search, Pencil, Trash2, Package, Tag, X, ChevronRight, GripVertical } from 'lucide-react'
-import { DEFAULT_PRODUCTS, DEFAULT_CATEGORIES, type Product, type ProductVariation, type CategoryConfig } from '@/lib/pos-types'
+import {
+  DEFAULT_PRODUCTS,
+  DEFAULT_CATEGORIES,
+  type Product,
+  type ProductVariationGroup,
+  type ProductVariationOption,
+  type CategoryConfig,
+} from '@/lib/pos-types'
 
 function formatCurrency(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -224,19 +231,21 @@ export default function ProdutosPage() {
                           {categories.find((c) => c.id === product.category)?.name || product.category}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        {product.variations && product.variations.length > 0 ? (
-                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                            <ChevronRight className="h-4 w-4" />
-                            <span>{product.variations.length} opcoes</span>
-                            {product.requiresVariation && (
-                              <span className="ml-1 px-1.5 py-0.5 bg-warning/20 text-warning text-xs rounded">obrigatorio</span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-sm text-muted-foreground">-</span>
-                        )}
-                      </td>
+                        <td className="px-6 py-4">
+                          {product.variationGroups && product.variationGroups.length > 0 ? (
+                            <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                              <ChevronRight className="h-4 w-4" />
+                              <span>{product.variationGroups.length} grupos</span>
+                              {product.variationGroups.some((g) => g.required) && (
+                                <span className="ml-1 px-1.5 py-0.5 bg-warning/20 text-warning text-xs rounded">
+                                  obrigatorio
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">-</span>
+                          )}
+                        </td>
                       <td className="px-6 py-4 text-right">
                         <span className="font-mono text-foreground">{formatCurrency(product.price)}</span>
                       </td>
@@ -373,44 +382,87 @@ function ProductModal({
   const [price, setPrice] = useState(product?.price.toString() || '')
   const [category, setCategory] = useState(product?.category || categories[0]?.id || '')
   const [emoji, setEmoji] = useState(product?.emoji || '📦')
-  const [variations, setVariations] = useState<ProductVariation[]>(product?.variations || [])
-  const [requiresVariation, setRequiresVariation] = useState(product?.requiresVariation || false)
-  const [allowMultiple, setAllowMultiple] = useState(product?.allowMultiple || false)
-  const [newVariationName, setNewVariationName] = useState('')
-  const [newVariationPrice, setNewVariationPrice] = useState('0')
+  const [variationGroups, setVariationGroups] = useState<ProductVariationGroup[]>(
+    product?.variationGroups || []
+  )
 
-  const handleAddVariation = () => {
-    if (!newVariationName.trim()) return
-    const newVariation: ProductVariation = {
+  const [newGroupName, setNewGroupName] = useState('')
+  const [newGroupRequired, setNewGroupRequired] = useState(false)
+  const [newGroupSelectionType, setNewGroupSelectionType] = useState<'single' | 'multiple'>('single')
+
+  const handleAddGroup = () => {
+    if (!newGroupName.trim()) return
+
+    const newGroup: ProductVariationGroup = {
       id: Math.random().toString(36).substring(2, 9),
-      name: newVariationName.trim(),
-      priceModifier: parseFloat(newVariationPrice) || 0,
+      name: newGroupName.trim(),
+      required: newGroupRequired,
+      selectionType: newGroupSelectionType,
+      options: [],
     }
-    setVariations((prev) => [...prev, newVariation])
-    setNewVariationName('')
-    setNewVariationPrice('0')
+
+    setVariationGroups((prev) => [...prev, newGroup])
+    setNewGroupName('')
+    setNewGroupRequired(false)
+    setNewGroupSelectionType('single')
   }
 
-  const handleRemoveVariation = (variationId: string) => {
-    setVariations((prev) => prev.filter((v) => v.id !== variationId))
+  const handleRemoveGroup = (groupId: string) => {
+    setVariationGroups((prev) => prev.filter((g) => g.id !== groupId))
+  }
+
+  const handleUpdateGroup = (
+    groupId: string,
+    updates: Partial<ProductVariationGroup>
+  ) => {
+    setVariationGroups((prev) =>
+      prev.map((g) => (g.id === groupId ? { ...g, ...updates } : g))
+    )
+  }
+
+  const handleAddOption = (groupId: string, optionName: string, optionPrice: string) => {
+    if (!optionName.trim()) return
+
+    const newOption: ProductVariationOption = {
+      id: Math.random().toString(36).substring(2, 9),
+      name: optionName.trim(),
+      priceModifier: parseFloat(optionPrice) || 0,
+    }
+
+    setVariationGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? { ...g, options: [...g.options, newOption] }
+          : g
+      )
+    )
+  }
+
+  const handleRemoveOption = (groupId: string, optionId: string) => {
+    setVariationGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? { ...g, options: g.options.filter((o) => o.id !== optionId) }
+          : g
+      )
+    )
   }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+
     onSave({
       name,
       price: parseFloat(price) || 0,
       category,
       emoji,
-      variations: variations.length > 0 ? variations : undefined,
-      requiresVariation: variations.length > 0 ? requiresVariation : undefined,
-      allowMultiple: variations.length > 0 ? allowMultiple : undefined,
+      variationGroups: variationGroups.length > 0 ? variationGroups : undefined,
     })
   }
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-card rounded-xl border border-border w-full max-w-lg mx-4 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-card rounded-xl border border-border w-full max-w-3xl mx-4 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <h2 className="text-lg font-semibold text-foreground">
             {product ? 'Editar Produto' : 'Novo Produto'}
@@ -423,7 +475,7 @@ function ProductModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
           <div className="flex gap-4">
             <div className="flex-1">
               <label className="block text-sm font-medium text-foreground mb-2">Nome</label>
@@ -431,8 +483,7 @@ function ProductModal({
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Ex: Cerveja Heineken"
+                className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground"
                 required
               />
             </div>
@@ -442,7 +493,7 @@ function ProductModal({
                 type="text"
                 value={emoji}
                 onChange={(e) => setEmoji(e.target.value)}
-                className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground text-center text-2xl focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground text-center text-2xl"
                 maxLength={2}
               />
             </div>
@@ -457,8 +508,7 @@ function ProductModal({
                 min="0"
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
-                className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="0.00"
+                className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground"
                 required
               />
             </div>
@@ -467,7 +517,7 @@ function ProductModal({
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground"
               >
                 {categories.map((cat) => (
                   <option key={cat.id} value={cat.id}>
@@ -478,87 +528,64 @@ function ProductModal({
             </div>
           </div>
 
-          {/* Variations Section */}
-          <div className="border-t border-border pt-4">
-            <div className="flex items-center justify-between mb-3">
-              <label className="block text-sm font-medium text-foreground">Variacoes</label>
-              {variations.length > 0 && (
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      checked={requiresVariation}
-                      onChange={(e) => setRequiresVariation(e.target.checked)}
-                      className="rounded border-border"
-                    />
-                    Obrigatorio
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      checked={allowMultiple}
-                      onChange={(e) => setAllowMultiple(e.target.checked)}
-                      className="rounded border-border"
-                    />
-                    Escolha multipla
-                  </label>
-                </div>
-              )}
-            </div>
+          <div className="border-t border-border pt-4 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-3">
+                Grupos de Variacao
+              </label>
 
-            {/* Existing Variations */}
-            {variations.length > 0 && (
-              <div className="space-y-2 mb-3">
-                {variations.map((variation) => (
-                  <div
-                    key={variation.id}
-                    className="flex items-center justify-between p-3 bg-secondary rounded-lg"
-                  >
-                    <span className="font-medium text-foreground">{variation.name}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-muted-foreground">
-                        {variation.priceModifier >= 0 ? '+' : ''}{formatCurrency(variation.priceModifier)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveVariation(variation.id)}
-                        className="text-destructive hover:text-destructive/80"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
+              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 mb-4">
+                <input
+                  type="text"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  placeholder="Ex: Fruta"
+                  className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
+                />
+                <select
+                  value={newGroupSelectionType}
+                  onChange={(e) =>
+                    setNewGroupSelectionType(e.target.value as 'single' | 'multiple')
+                  }
+                  className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
+                >
+                  <option value="single">Unica</option>
+                  <option value="multiple">Multipla</option>
+                </select>
+                <label className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={newGroupRequired}
+                    onChange={(e) => setNewGroupRequired(e.target.checked)}
+                  />
+                  Obrigatorio
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAddGroup}
+                  className="px-3 py-2 bg-secondary text-secondary-foreground rounded-lg"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {variationGroups.map((group) => (
+                  <VariationGroupEditor
+                    key={group.id}
+                    group={group}
+                    onRemove={() => handleRemoveGroup(group.id)}
+                    onUpdate={(updates) => handleUpdateGroup(group.id, updates)}
+                    onAddOption={(name, price) => handleAddOption(group.id, name, price)}
+                    onRemoveOption={(optionId) => handleRemoveOption(group.id, optionId)}
+                  />
                 ))}
               </div>
-            )}
-
-            {/* Add New Variation */}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newVariationName}
-                onChange={(e) => setNewVariationName(e.target.value)}
-                className="flex-1 px-3 py-2 bg-input border border-border rounded-lg text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Nome da variacao (ex: Com Limao)"
-              />
-              <input
-                type="number"
-                step="0.01"
-                value={newVariationPrice}
-                onChange={(e) => setNewVariationPrice(e.target.value)}
-                className="w-24 px-3 py-2 bg-input border border-border rounded-lg text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="+/-"
-              />
-              <button
-                type="button"
-                onClick={handleAddVariation}
-                className="px-3 py-2 bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/80 transition-colors"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
             </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              Adicione variacoes como sabores ou opcoes. O modificador de preco e somado ao preco base.
+
+            <p className="text-xs text-muted-foreground">
+              Exemplo: Fruta (obrigatorio, unica), Destilado (obrigatorio, unica),
+              Ajustes (opcional, multipla).
             </p>
           </div>
 
@@ -566,18 +593,128 @@ function ProductModal({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-3 bg-secondary text-secondary-foreground rounded-lg font-medium hover:bg-secondary/80 transition-colors"
+              className="flex-1 px-4 py-3 bg-secondary text-secondary-foreground rounded-lg font-medium"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
+              className="flex-1 px-4 py-3 bg-primary text-primary-foreground rounded-lg font-medium"
             >
               {product ? 'Salvar' : 'Adicionar'}
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+function VariationGroupEditor({
+  group,
+  onRemove,
+  onUpdate,
+  onAddOption,
+  onRemoveOption,
+}: {
+  group: ProductVariationGroup
+  onRemove: () => void
+  onUpdate: (updates: Partial<ProductVariationGroup>) => void
+  onAddOption: (name: string, price: string) => void
+  onRemoveOption: (optionId: string) => void
+}) {
+  const [newOptionName, setNewOptionName] = useState('')
+  const [newOptionPrice, setNewOptionPrice] = useState('0')
+
+  return (
+    <div className="border border-border rounded-xl p-4 space-y-4">
+      <div className="flex items-center gap-3">
+        <input
+          type="text"
+          value={group.name}
+          onChange={(e) => onUpdate({ name: e.target.value })}
+          className="flex-1 px-3 py-2 bg-input border border-border rounded-lg text-foreground"
+        />
+        <select
+          value={group.selectionType}
+          onChange={(e) =>
+            onUpdate({ selectionType: e.target.value as 'single' | 'multiple' })
+          }
+          className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
+        >
+          <option value="single">Unica</option>
+          <option value="multiple">Multipla</option>
+        </select>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={group.required}
+            onChange={(e) => onUpdate({ required: e.target.checked })}
+          />
+          Obrigatorio
+        </label>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="p-2 text-destructive hover:bg-destructive/10 rounded-lg"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+
+      {group.options.length > 0 && (
+        <div className="space-y-2">
+          {group.options.map((option) => (
+            <div
+              key={option.id}
+              className="flex items-center justify-between p-3 bg-secondary rounded-lg"
+            >
+              <span className="font-medium text-foreground">{option.name}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">
+                  {option.priceModifier >= 0 ? '+' : ''}
+                  {formatCurrency(option.priceModifier)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onRemoveOption(option.id)}
+                  className="text-destructive hover:text-destructive/80"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newOptionName}
+          onChange={(e) => setNewOptionName(e.target.value)}
+          className="flex-1 px-3 py-2 bg-input border border-border rounded-lg text-foreground"
+          placeholder="Nome da opcao"
+        />
+        <input
+          type="number"
+          step="0.01"
+          value={newOptionPrice}
+          onChange={(e) => setNewOptionPrice(e.target.value)}
+          className="w-28 px-3 py-2 bg-input border border-border rounded-lg text-foreground"
+          placeholder="+/-"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            onAddOption(newOptionName, newOptionPrice)
+            setNewOptionName('')
+            setNewOptionPrice('0')
+          }}
+          className="px-3 py-2 bg-secondary text-secondary-foreground rounded-lg"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
       </div>
     </div>
   )

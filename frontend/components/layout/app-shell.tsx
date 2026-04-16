@@ -1,9 +1,9 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
-import { Sidebar } from '@/components/sidebar'
+import { Sidebar } from './sidebar'
 
-export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
+export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isLogin = pathname === '/login'
 

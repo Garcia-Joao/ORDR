@@ -2,7 +2,7 @@
 
 import { Printer, X, QrCode } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { Order } from '@/lib/pos-types'
+import type { Order, OrderItem } from '@/lib/pos-types'
 import { formatBRL, getItemPrice } from '@/lib/pos-types'
 
 interface TicketPreviewProps {
@@ -11,9 +11,48 @@ interface TicketPreviewProps {
   onPrint: () => void
 }
 
+function getItemKey(item: OrderItem): string {
+  const selections = (item.variationSelections ?? [])
+    .map((selection) => ({
+      groupId: selection.groupId,
+      selectedOptionIds: [...selection.selectedOptionIds].sort(),
+    }))
+    .sort((a, b) => a.groupId.localeCompare(b.groupId))
+
+  return `${item.product.id}-${JSON.stringify(selections)}`
+}
+
+function getVariationLabels(item: OrderItem): string[] {
+  if (!item.variationSelections?.length || !item.product.variationGroups?.length) {
+    return []
+  }
+
+  return item.variationSelections.flatMap((selection) => {
+    const group = item.product.variationGroups?.find(
+      (group) => group.id === selection.groupId
+    )
+
+    if (!group) return []
+
+    return selection.selectedOptionIds
+      .map((optionId) => {
+        const option = group.options.find((option) => option.id === optionId)
+        return option ? `${group.name}: ${option.name}` : null
+      })
+      .filter((value): value is string => value !== null)
+  })
+}
+
 export function TicketPreview({ order, onClose, onPrint }: TicketPreviewProps) {
-  const subtotal = order.items.reduce(
-    (sum, item) => sum + getItemPrice(item) * item.quantity,
+const items = Array.isArray(order.items) ? order.items : []
+const orderTotal = Number(order.total ?? 0)
+const createdAt =
+  order.createdAt instanceof Date
+    ? order.createdAt
+    : new Date(order.createdAt)
+
+  const subtotal = items.reduce(
+    (sum, item) => sum + Number(getItemPrice(item) ?? 0) * item.quantity,
     0
   )
   const tax = subtotal * 0.08
@@ -21,7 +60,6 @@ export function TicketPreview({ order, onClose, onPrint }: TicketPreviewProps) {
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <h3 className="text-lg font-semibold text-foreground">Detalhes do Pedido</h3>
           <button
@@ -32,16 +70,13 @@ export function TicketPreview({ order, onClose, onPrint }: TicketPreviewProps) {
           </button>
         </div>
 
-        {/* Ticket Content */}
         <div className="p-6">
           <div className="bg-foreground text-background rounded-lg p-6 font-mono text-sm">
-            {/* Store Header */}
             <div className="text-center border-b border-dashed border-background/30 pb-4 mb-4">
               <h4 className="text-xl font-bold">ORDR</h4>
               <p className="text-xs opacity-70 mt-1">Bar & Eventos POS</p>
             </div>
 
-            {/* Order Info */}
             <div className="space-y-1 mb-4 pb-4 border-b border-dashed border-background/30">
               <div className="flex justify-between text-xs">
                 <span>Pedido</span>
@@ -54,7 +89,7 @@ export function TicketPreview({ order, onClose, onPrint }: TicketPreviewProps) {
               <div className="flex justify-between text-xs">
                 <span>Data</span>
                 <span>
-                  {order.createdAt.toLocaleDateString('pt-BR', {
+                  {createdAt.toLocaleDateString('pt-BR', {
                     day: '2-digit',
                     month: '2-digit',
                     year: 'numeric',
@@ -64,7 +99,7 @@ export function TicketPreview({ order, onClose, onPrint }: TicketPreviewProps) {
               <div className="flex justify-between text-xs">
                 <span>Hora</span>
                 <span>
-                  {order.createdAt.toLocaleTimeString('pt-BR', {
+                  {createdAt.toLocaleTimeString('pt-BR', {
                     hour: '2-digit',
                     minute: '2-digit',
                   })}
@@ -72,31 +107,39 @@ export function TicketPreview({ order, onClose, onPrint }: TicketPreviewProps) {
               </div>
             </div>
 
-            {/* Items */}
             <div className="border-b border-dashed border-background/30 pb-4 mb-4 space-y-2">
               <p className="text-xs opacity-70 mb-2">ITENS</p>
-              {order.items.map((item, index) => {
+
+              {items.map((item) => {
                 const itemPrice = getItemPrice(item)
-                const itemKey = item.selectedVariation 
-                  ? `${item.product.id}-${item.selectedVariation.id}` 
-                  : `${item.product.id}-${index}`
+                const itemKey = getItemKey(item)
+                const variationLabels = getVariationLabels(item)
+
                 return (
-                  <div key={itemKey} className="flex justify-between">
-                    <div>
+                  <div key={itemKey} className="flex justify-between gap-3">
+                    <div className="min-w-0">
                       <span>{item.quantity}x {item.product.name}</span>
-                      {item.selectedVariation && (
-                        <span className="text-xs opacity-70 block ml-4">
-                          {item.selectedVariation.name}
-                        </span>
+
+                      {variationLabels.length > 0 && (
+                        <div className="ml-4 mt-1">
+                          {variationLabels.map((label, index) => (
+                            <span
+                              key={`${itemKey}-variation-${index}`}
+                              className="text-xs opacity-70 block"
+                            >
+                              {label}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
+
                     <span>{formatBRL(itemPrice * item.quantity)}</span>
                   </div>
                 )
               })}
             </div>
 
-            {/* Totals */}
             <div className="space-y-1">
               <div className="flex justify-between text-xs opacity-70">
                 <span>Subtotal</span>
@@ -108,11 +151,10 @@ export function TicketPreview({ order, onClose, onPrint }: TicketPreviewProps) {
               </div>
               <div className="flex justify-between font-bold text-lg pt-2 border-t border-dashed border-background/30">
                 <span>TOTAL</span>
-                <span>{formatBRL(order.total)}</span>
+                <span>{formatBRL(orderTotal)}</span>
               </div>
             </div>
 
-            {/* Status Badge */}
             <div className="flex justify-center mt-4">
               {order.status === 'paid' && (
                 <span className="px-3 py-1 bg-background/20 rounded-full text-xs font-semibold uppercase">
@@ -131,7 +173,6 @@ export function TicketPreview({ order, onClose, onPrint }: TicketPreviewProps) {
               )}
             </div>
 
-            {/* QR Code Placeholder */}
             <div className="flex flex-col items-center mt-6 pt-4 border-t border-dashed border-background/30">
               <div className="h-16 w-16 bg-background/20 rounded-lg flex items-center justify-center mb-2">
                 <QrCode className="h-10 w-10 text-background" />
@@ -139,7 +180,6 @@ export function TicketPreview({ order, onClose, onPrint }: TicketPreviewProps) {
               <p className="text-xs opacity-70">Escaneie para recibo digital</p>
             </div>
 
-            {/* Footer */}
             <div className="text-center text-xs opacity-50 mt-4 pt-4 border-t border-dashed border-background/30">
               <p>Obrigado pela preferencia!</p>
               <p className="mt-1">Powered by Ordr POS</p>
@@ -147,7 +187,6 @@ export function TicketPreview({ order, onClose, onPrint }: TicketPreviewProps) {
           </div>
         </div>
 
-        {/* Actions */}
         <div className="flex gap-3 p-5 pt-0">
           <Button variant="outline" onClick={onClose} className="flex-1">
             Fechar

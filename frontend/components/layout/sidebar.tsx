@@ -28,7 +28,6 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
-
   return (
     <aside
       className={`flex flex-col h-screen bg-sidebar border-r border-sidebar-border transition-all duration-300 ${

@@ -1,10 +1,11 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
+import AppShell from '@/components/layout/app-shell'
 import './globals.css'
 
-const _geist = Geist({ subsets: ["latin"] });
-const _geistMono = Geist_Mono({ subsets: ["latin"] });
+const _geist = Geist({ subsets: ['latin'] })
+const _geistMono = Geist_Mono({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'Ordr - Point of Sale',
@@ -31,13 +32,17 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode
-}>) {
+}) {
   return (
     <html lang="pt-BR" className="dark bg-background">
       <body className="font-sans antialiased min-h-screen">
-        {children}
+        
+        <AppShell>
+          {children}
+        </AppShell>
+
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

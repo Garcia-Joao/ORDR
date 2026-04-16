@@ -8,21 +8,51 @@ import { OrderPanel } from '@/components/pos/order-panel'
 import { OrdersList } from '@/components/pos/orders-list'
 import { TicketPreview } from '@/components/pos/ticket-preview'
 import { ListOrdered, Clock, Wifi, WifiOff } from 'lucide-react'
-import type { Order, OrderItem, Product, ProductVariation, CategoryConfig } from '@/lib/pos-types'
+import type {
+  Order,
+  OrderItem,
+  Product,
+  OrderItemVariationSelection,
+  CategoryConfig,
+} from '@/lib/pos-types'
 import { generateSampleOrders, DEFAULT_PRODUCTS, DEFAULT_CATEGORIES, getItemPrice } from '@/lib/pos-types'
+
+import { createOrder } from '@/lib/api'
+import { login } from '@/lib/api'
+import { logout } from '@/lib/api'
 
 function generateOrderId(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
 }
 
+function getVariationSummary(item: OrderItem) {
+  if (!item.variationSelections?.length) return []
+
+  return item.variationSelections.flatMap((selection) => {
+    const group = item.product.variationGroups?.find(
+      (g) => g.id === selection.groupId
+    )
+
+    if (!group) return []
+
+    return selection.selectedOptionIds.map((optionId) => {
+      const option = group.options.find((o) => o.id === optionId)
+      return option ? `${group.name}: ${option.name}` : null
+    }).filter(Boolean)
+  })
+}
+
 // Generate unique key for order item (product + variation combo)
 function getItemKey(item: OrderItem): string {
-  if (item.selectedVariations && item.selectedVariations.length > 0) {
-    return `${item.product.id}-${item.selectedVariations.map(v => v.id).join('-')}`
-  }
-  return item.selectedVariation 
-    ? `${item.product.id}-${item.selectedVariation.id}` 
-    : item.product.id
+  const selections = (item.variationSelections ?? [])
+    .map((selection) => ({
+      groupId: selection.groupId,
+      selectedOptionIds: [...selection.selectedOptionIds].sort(),
+    }))
+    .sort((a, b) => a.groupId.localeCompare(b.groupId))
+
+  const selectionKey = JSON.stringify(selections)
+  return `${item.product.id}-${selectionKey}`
 }
 
 export default function POSPage() {
@@ -96,15 +126,18 @@ export default function POSPage() {
     }
   }, [])
 
-  const handleAddProduct = useCallback((product: Product, variation?: ProductVariation, variations?: ProductVariation[]) => {
+const handleAddProduct = useCallback(
+  (product: Product, variationSelections?: OrderItemVariationSelection[]) => {
     setCurrentOrderItems((prev) => {
-      // For multiple variations, create a unique key
-      const itemKey = variations 
-        ? `${product.id}-${variations.map(v => v.id).join('-')}`
-        : variation ? `${product.id}-${variation.id}` : product.id
-      
+      const newItem: OrderItem = {
+        product,
+        quantity: 1,
+        variationSelections,
+      }
+
+      const itemKey = getItemKey(newItem)
       const existingItem = prev.find((item) => getItemKey(item) === itemKey)
-      
+
       if (existingItem) {
         return prev.map((item) =>
           getItemKey(item) === itemKey
@@ -112,9 +145,12 @@ export default function POSPage() {
             : item
         )
       }
-      return [...prev, { product, quantity: 1, selectedVariation: variation, selectedVariations: variations }]
+
+      return [...prev, newItem]
     })
-  }, [])
+  },
+  []
+)
 
   const handleUpdateQuantity = useCallback((itemKey: string, delta: number) => {
     setCurrentOrderItems((prev) =>
@@ -140,13 +176,28 @@ export default function POSPage() {
     setCurrentComanda(null)
   }, [])
 
-  const handleCharge = useCallback(() => {
-    if (currentOrderItems.length === 0 || currentComanda === null || currentOrderId === null) return
+const handleCharge = useCallback(async () => {
+  try {
+    if (currentComanda == null) {
+      console.error('Comanda não definida')
+      return
+    }
+
+    if (!currentOrderId) {
+      console.error('Order ID não definido')
+      return
+    }
+
+    if (currentOrderItems.length === 0) {
+      console.error('Pedido vazio')
+      return
+    }
 
     const subtotal = currentOrderItems.reduce(
-      (sum, item) => sum + getItemPrice(item) * item.quantity,
+      (sum, item) => sum + Number(getItemPrice(item) ?? 0) * item.quantity,
       0
     )
+
     const tax = subtotal * 0.08
     const total = subtotal + tax
 
@@ -160,12 +211,30 @@ export default function POSPage() {
       paidAt: new Date(),
     }
 
-    setOrders((prev) => [newOrder, ...prev])
-    setSelectedOrder(newOrder)
+    const savedOrder = await createOrder(newOrder)
+
+    const normalizedOrder: Order = {
+      ...newOrder,
+      ...savedOrder,
+      items: Array.isArray(savedOrder?.items) ? savedOrder.items : newOrder.items,
+      total: Number(savedOrder?.total ?? newOrder.total ?? 0),
+      createdAt: savedOrder?.createdAt
+        ? new Date(savedOrder.createdAt)
+        : newOrder.createdAt,
+      paidAt: savedOrder?.paidAt
+        ? new Date(savedOrder.paidAt)
+        : newOrder.paidAt,
+    }
+
+    setOrders((prev) => [normalizedOrder, ...prev])
+    setSelectedOrder(normalizedOrder)
     setCurrentOrderItems([])
     setCurrentOrderId(generateOrderId())
     setCurrentComanda(null)
-  }, [currentOrderItems, currentOrderId, currentComanda])
+  } catch (err) {
+    console.error('Erro ao enviar pedido:', err)
+  }
+}, [currentOrderItems, currentOrderId, currentComanda])
 
   const handleSelectOrder = useCallback((order: Order) => {
     setSelectedOrder(order)
@@ -175,14 +244,22 @@ export default function POSPage() {
     setSelectedOrder(null)
   }, [])
 
-  const handleLogout = useCallback(() => {
+const handleLogout = useCallback(async () => {
+  try {
+    await logout()
+
     localStorage.removeItem('ordr-user')
     setCurrentUser(null)
     setCurrentOrderItems([])
     setCurrentOrderId(generateOrderId())
     setCurrentComanda(null)
+
     router.push('/login')
-  }, [router])
+    router.refresh()
+  } catch (error) {
+    console.error('Erro ao deslogar:', error)
+  }
+}, [router])
 
   // Show loading while checking auth
   if (isLoading) {
