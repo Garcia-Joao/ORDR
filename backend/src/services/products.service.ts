@@ -140,31 +140,179 @@ export async function createProduct(data: CreateProductInput) {
 
   await ensureCategoryBelongsToCompany(data.categoryId, data.companyId)
 
-  const product = await prisma.product.create({
-    data: {
+  const existingProduct = await prisma.product.findFirst({
+    where: {
       companyId: data.companyId,
-      categoryId: data.categoryId,
       name: data.name,
-      description: data.description ?? null,
-      emoji: data.emoji ?? null,
-      price: new Prisma.Decimal(data.price),
-      active: data.active ?? true,
+    },
+    include: {
+      category: true,
       variationGroups: {
-        create: (data.variationGroups ?? []).map((group, groupIndex) => ({
-          name: group.name,
-          selectionType: group.selectionType,
-          required: group.required ?? false,
-          sortOrder: group.sortOrder ?? groupIndex,
+        orderBy: { sortOrder: 'asc' },
+        include: {
           options: {
-            create: (group.options ?? []).map((option, optionIndex) => ({
-              name: option.name,
-              priceModifier: new Prisma.Decimal(option.priceModifier ?? 0),
-              sortOrder: option.sortOrder ?? optionIndex,
-              active: option.active ?? true,
-            })),
+            orderBy: { sortOrder: 'asc' },
           },
-        })),
+        },
       },
+    },
+  })
+
+  if (!existingProduct) {
+    const product = await prisma.product.create({
+      data: {
+        companyId: data.companyId,
+        categoryId: data.categoryId,
+        name: data.name,
+        description: data.description ?? null,
+        emoji: data.emoji ?? null,
+        price: new Prisma.Decimal(data.price),
+        active: data.active ?? true,
+        variationGroups: {
+          create: (data.variationGroups ?? []).map((group, groupIndex) => ({
+            name: group.name,
+            selectionType: group.selectionType,
+            required: group.required ?? false,
+            sortOrder: group.sortOrder ?? groupIndex,
+            options: {
+              create: (group.options ?? []).map((option, optionIndex) => ({
+                name: option.name,
+                priceModifier: new Prisma.Decimal(option.priceModifier ?? 0),
+                sortOrder: option.sortOrder ?? optionIndex,
+                active: option.active ?? true,
+              })),
+            },
+          })),
+        },
+      },
+      include: {
+        category: true,
+        variationGroups: {
+          orderBy: { sortOrder: 'asc' },
+          include: {
+            options: {
+              where: { active: true },
+              orderBy: { sortOrder: 'asc' },
+            },
+          },
+        },
+      },
+    })
+
+    return normalizeProduct(product)
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.product.update({
+      where: {
+        id: existingProduct.id,
+      },
+      data: {
+        categoryId: data.categoryId,
+        description: data.description ?? null,
+        emoji: data.emoji ?? null,
+        price: new Prisma.Decimal(data.price),
+        active: true,
+      },
+    })
+
+    const incomingGroups = data.variationGroups ?? []
+
+    for (let groupIndex = 0; groupIndex < incomingGroups.length; groupIndex++) {
+      const incomingGroup = incomingGroups[groupIndex]
+
+      const matchedGroup = existingProduct.variationGroups.find(
+        (g) => g.name === incomingGroup.name
+      )
+
+      let groupId: string
+
+      if (matchedGroup) {
+        const updatedGroup = await tx.productVariationGroup.update({
+          where: {
+            id: matchedGroup.id,
+          },
+          data: {
+            selectionType: incomingGroup.selectionType,
+            required: incomingGroup.required ?? false,
+            sortOrder: incomingGroup.sortOrder ?? groupIndex,
+          },
+        })
+
+        groupId = updatedGroup.id
+      } else {
+        const createdGroup = await tx.productVariationGroup.create({
+          data: {
+            productId: existingProduct.id,
+            name: incomingGroup.name,
+            selectionType: incomingGroup.selectionType,
+            required: incomingGroup.required ?? false,
+            sortOrder: incomingGroup.sortOrder ?? groupIndex,
+          },
+        })
+
+        groupId = createdGroup.id
+      }
+
+      const existingGroupAfterUpsert = await tx.productVariationGroup.findUnique({
+        where: { id: groupId },
+        include: { options: true },
+      })
+
+      const existingOptions = existingGroupAfterUpsert?.options ?? []
+      const incomingOptions = incomingGroup.options ?? []
+
+      for (let optionIndex = 0; optionIndex < incomingOptions.length; optionIndex++) {
+        const incomingOption = incomingOptions[optionIndex]
+
+        const matchedOption = existingOptions.find(
+          (o) => o.name === incomingOption.name
+        )
+
+        if (matchedOption) {
+          await tx.productVariationOption.update({
+            where: {
+              id: matchedOption.id,
+            },
+            data: {
+              priceModifier: new Prisma.Decimal(incomingOption.priceModifier ?? 0),
+              sortOrder: incomingOption.sortOrder ?? optionIndex,
+              active: incomingOption.active ?? true,
+            },
+          })
+        } else {
+          await tx.productVariationOption.create({
+            data: {
+              groupId,
+              name: incomingOption.name,
+              priceModifier: new Prisma.Decimal(incomingOption.priceModifier ?? 0),
+              sortOrder: incomingOption.sortOrder ?? optionIndex,
+              active: incomingOption.active ?? true,
+            },
+          })
+        }
+      }
+
+      const incomingOptionNames = new Set(incomingOptions.map((o) => o.name))
+
+      for (const existingOption of existingOptions) {
+        if (!incomingOptionNames.has(existingOption.name)) {
+          await tx.productVariationOption.update({
+            where: {
+              id: existingOption.id,
+            },
+            data: {
+              active: false,
+            },
+          })
+        }
+      }
+    }
+  })
+
+  const reactivatedProduct = await prisma.product.findUnique({
+    where: {
+      id: existingProduct.id,
     },
     include: {
       category: true,
@@ -180,7 +328,11 @@ export async function createProduct(data: CreateProductInput) {
     },
   })
 
-  return normalizeProduct(product)
+  if (!reactivatedProduct) {
+    throw new Error('PRODUCT_REACTIVATION_FAILED')
+  }
+
+  return normalizeProduct(reactivatedProduct)
 }
 
 export async function updateProduct(
@@ -287,8 +439,9 @@ export async function deleteProduct(productId: string, companyId: string) {
     throw new Error('PRODUCT_NOT_FOUND')
   }
 
-  await prisma.product.delete({
+  await prisma.product.update({
     where: { id: productId },
+    data: { active: false },
   })
 
   return { ok: true }

@@ -1,340 +1,333 @@
 'use client'
 
+import type { Product, CategoryConfig, OrderItemVariationSelection } from '@/lib/pos-types'
+import { formatBRL, validateOrderItem } from '@/lib/pos-types'
 import { useMemo, useState } from 'react'
-import { X, ChevronRight } from 'lucide-react'
-import type {
-  Product,
-  CategoryConfig,
-  ProductVariationGroup,
-  OrderItemVariationSelection,
-} from '@/lib/pos-types'
-import { formatBRL } from '@/lib/pos-types'
+import { X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 interface ProductGridProps {
   category: string
   products: Product[]
   categories: CategoryConfig[]
-  onAddProduct: (
-    product: Product,
-    variationSelections?: OrderItemVariationSelection[]
-  ) => void
+  onAddProduct: (product: Product, variationSelections?: OrderItemVariationSelection[]) => void
 }
 
-type SelectionState = Record<string, Set<string>>
-
-export function ProductGrid({ category, products, onAddProduct }: ProductGridProps) {
+export function ProductGrid({
+  category,
+  products,
+  categories,
+  onAddProduct,
+}: ProductGridProps) {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [groupSelections, setGroupSelections] = useState<SelectionState>({})
+  const [selectedVariations, setSelectedVariations] = useState<OrderItemVariationSelection[]>([])
 
-  const filteredProducts = products.filter((p) => p.categoryId === category)
-
-  const variationGroups = selectedProduct?.variationGroups ?? []
-
-  const selectionCount = useMemo(
-    () =>
-      Object.values(groupSelections).reduce((sum, selectedSet) => sum + selectedSet.size, 0),
-    [groupSelections]
-  )
-
-  const getOptionModifier = (product: Product, optionId: string) => {
-    for (const group of product.variationGroups ?? []) {
-      const option = group.options.find((o) => o.id === optionId)
-      if (option) return option.priceModifier
+  const visibleProducts = useMemo(() => {
+    if (!category) {
+      return products
     }
-    return 0
-  }
 
-  const selectedTotalModifier = useMemo(() => {
-    if (!selectedProduct) return 0
-
-    let total = 0
-    for (const optionIds of Object.values(groupSelections)) {
-      for (const optionId of optionIds) {
-        total += getOptionModifier(selectedProduct, optionId)
-      }
-    }
-    return total
-  }, [groupSelections, selectedProduct])
-
-  const buildVariationSelections = (): OrderItemVariationSelection[] => {
-    return Object.entries(groupSelections)
-      .filter(([, selectedSet]) => selectedSet.size > 0)
-      .map(([groupId, selectedSet]) => ({
-        groupId,
-        selectedOptionIds: Array.from(selectedSet),
-      }))
-  }
-
-  const resetSelection = () => {
-    setSelectedProduct(null)
-    setGroupSelections({})
-  }
-
-  const hasGroups = (product: Product) =>
-    !!product.variationGroups && product.variationGroups.length > 0
-
-  const isGroupSatisfied = (group: ProductVariationGroup) => {
-    const selected = groupSelections[group.id]
-    const count = selected?.size ?? 0
-    return !group.required || count > 0
-  }
-
-  const allRequiredGroupsSatisfied = useMemo(() => {
-    if (!selectedProduct) return true
-    return variationGroups.every(isGroupSatisfied)
-  }, [selectedProduct, variationGroups, groupSelections])
+    return products.filter((product) => product.categoryId === category)
+  }, [products, category])
 
   const handleProductClick = (product: Product) => {
-    if (hasGroups(product)) {
-      if (selectedProduct?.id === product.id) {
-        resetSelection()
-      } else {
-        setSelectedProduct(product)
-        setGroupSelections({})
-      }
-    } else {
+    const hasVariations = (product.variationGroups?.length ?? 0) > 0
+
+    if (!hasVariations) {
       onAddProduct(product)
+      return
     }
+
+    setSelectedProduct(product)
+    setSelectedVariations([])
   }
 
-  const handleOptionToggle = (
-    group: ProductVariationGroup,
-    optionId: string
-  ) => {
-    if (!selectedProduct) return
+  const handleToggleOption = (groupId: string, optionId: string, selectionType: 'single' | 'multiple') => {
+    setSelectedVariations((prev) => {
+      const existing = prev.find((selection) => selection.groupId === groupId)
 
-    setGroupSelections((prev) => {
-      const current = prev[group.id] ?? new Set<string>()
-
-      if (group.selectionType === 'single') {
-        return {
+      if (!existing) {
+        return [
           ...prev,
-          [group.id]: new Set([optionId]),
-        }
+          {
+            groupId,
+            selectedOptionIds: [optionId],
+          },
+        ]
       }
 
-      const next = new Set(current)
-      if (next.has(optionId)) {
-        next.delete(optionId)
-      } else {
-        next.add(optionId)
+      if (selectionType === 'single') {
+        return prev.map((selection) =>
+          selection.groupId === groupId
+            ? {
+                ...selection,
+                selectedOptionIds: [optionId],
+              }
+            : selection
+        )
       }
 
-      return {
-        ...prev,
-        [group.id]: next,
-      }
+      const alreadySelected = existing.selectedOptionIds.includes(optionId)
+
+      return prev.map((selection) =>
+        selection.groupId === groupId
+          ? {
+              ...selection,
+              selectedOptionIds: alreadySelected
+                ? selection.selectedOptionIds.filter((id) => id !== optionId)
+                : [...selection.selectedOptionIds, optionId],
+            }
+          : selection
+      )
     })
   }
 
-  const handleAddSelected = () => {
-    if (!selectedProduct) return
-    if (!allRequiredGroupsSatisfied) return
-
-    const variationSelections = buildVariationSelections()
-    onAddProduct(
-      selectedProduct,
-      variationSelections.length > 0 ? variationSelections : undefined
-    )
-    resetSelection()
-  }
-
-  const handleAddWithoutVariation = () => {
+  const handleConfirmVariations = () => {
     if (!selectedProduct) return
 
-    const hasRequiredGroups = variationGroups.some((group) => group.required)
-    if (hasRequiredGroups) return
+    const draftItem = {
+      product: selectedProduct,
+      quantity: 1,
+      variationSelections: selectedVariations,
+    }
 
-    onAddProduct(selectedProduct)
-    resetSelection()
+    const errors = validateOrderItem(draftItem)
+
+    if (errors.length > 0) {
+      alert(errors[0])
+      return
+    }
+
+    onAddProduct(selectedProduct, selectedVariations)
+    setSelectedProduct(null)
+    setSelectedVariations([])
   }
 
-const getProjectedTotal = (
-  group: ProductVariationGroup,
-  optionId: string
-) => {
-  if (!selectedProduct) return 0
+  const getRunningPriceForGroup = (groupId: string, optionId?: string) => {
+    if (!selectedProduct) return 0
 
-  let totalModifier = 0
+    let total = selectedProduct.price
 
-  for (const currentGroup of variationGroups) {
-    const currentSelected = groupSelections[currentGroup.id] ?? new Set<string>()
-    let projectedSelection = new Set(currentSelected)
+    for (const selection of selectedVariations) {
+      const group = selectedProduct.variationGroups?.find((g) => g.id === selection.groupId)
+      if (!group) continue
 
-    if (currentGroup.id === group.id) {
-      if (currentGroup.selectionType === 'single') {
-        projectedSelection = new Set([optionId])
-      } else {
-        if (!projectedSelection.has(optionId)) {
-          projectedSelection.add(optionId)
+      for (const selectedOptionId of selection.selectedOptionIds) {
+        const option = group.options.find((o) => o.id === selectedOptionId)
+        if (option) {
+          total += option.priceModifier ?? 0
         }
       }
     }
 
-    for (const selectedOptionId of projectedSelection) {
-      totalModifier += getOptionModifier(selectedProduct, selectedOptionId)
+    if (groupId && optionId) {
+      const currentGroup = selectedProduct.variationGroups?.find((g) => g.id === groupId)
+      if (!currentGroup) return total
+
+      const currentSelection = selectedVariations.find((s) => s.groupId === groupId)
+      const option = currentGroup.options.find((o) => o.id === optionId)
+
+      if (!option) return total
+
+      if (currentGroup.selectionType === 'single') {
+        if (currentSelection?.selectedOptionIds.length) {
+          const previouslySelected = currentGroup.options.find((o) =>
+            currentSelection.selectedOptionIds.includes(o.id)
+          )
+          if (previouslySelected) {
+            total -= previouslySelected.priceModifier ?? 0
+          }
+        }
+        total += option.priceModifier ?? 0
+      } else {
+        const alreadySelected = currentSelection?.selectedOptionIds.includes(optionId)
+        if (!alreadySelected) {
+          total += option.priceModifier ?? 0
+        }
+      }
     }
+
+    return total
   }
 
-  return selectedProduct.price + totalModifier
-}
+  const selectedCategory = categories.find((cat) => cat.id === category)
 
   return (
-    <div className="flex-1 flex overflow-hidden">
-      <div className="flex-1 p-4 overflow-y-auto">
-        <div className="grid grid-cols-4 gap-3">
-          {filteredProducts.map((product) => {
-            const productHasGroups = hasGroups(product)
-            const isSelected = selectedProduct?.id === product.id
-
-            return (
-              <button
-                key={product.id}
-                onClick={() => handleProductClick(product)}
-                className={`relative flex flex-col items-center justify-center p-6 rounded-xl active:scale-95 transition-all border min-h-30 ${
-                  isSelected
-                    ? 'bg-primary/20 border-primary ring-2 ring-primary'
-                    : 'bg-secondary border-border hover:border-primary/50 hover:bg-secondary/80'
-                } group`}
-              >
-                <span className="text-3xl mb-2 group-hover:scale-110 transition-transform">
-                  {product.emoji}
-                </span>
-                <span className="text-sm font-medium text-foreground text-center leading-tight">
-                  {product.name}
-                </span>
-                <span className="text-lg font-bold text-primary mt-1">
-                  {formatBRL(product.price)}
-                </span>
-                {productHasGroups && (
-                  <div className="absolute top-2 right-2 flex items-center gap-1 text-xs text-muted-foreground">
-                    <ChevronRight className="h-4 w-4" />
-                  </div>
-                )}
-              </button>
-            )
-          })}
-        </div>
-
-        {filteredProducts.length === 0 && (
+    <>
+      <div className="flex-1 overflow-y-auto p-5">
+        {visibleProducts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <span className="text-4xl mb-4">📦</span>
-            <p className="text-lg font-medium">Nenhum produto nesta categoria</p>
-          </div>
-        )}
-      </div>
-
-      {selectedProduct && variationGroups.length > 0 && (
-        <div className="w-80 border-l border-border bg-card flex flex-col">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-            <div className="flex items-center gap-2">
-              <span className="text-xl">{selectedProduct.emoji}</span>
-              <span className="font-medium text-foreground">{selectedProduct.name}</span>
-            </div>
-            <button
-              onClick={resetSelection}
-              className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="p-3 border-b border-border space-y-1">
-            <p className="text-sm text-muted-foreground">
-              {selectionCount > 0
-                ? `${selectionCount} selecao${selectionCount !== 1 ? 'oes' : ''}`
-                : 'Selecione as opcoes'}
+            <p className="text-sm">
+              {products.length === 0
+                ? 'Nenhum produto cadastrado'
+                : 'Nenhum produto encontrado'}
             </p>
-            <p className="text-sm font-medium text-foreground">
-              Total atual: {formatBRL(selectedProduct.price + selectedTotalModifier)}
+            <p className="text-xs mt-1">
+              {products.length === 0
+                ? 'Cadastre produtos para começar'
+                : 'Tente outra busca ou categoria'}
             </p>
           </div>
+        ) : (
+          <>
+            {selectedCategory && category && (
+              <div className="mb-4">
+                <p className="text-sm text-muted-foreground">
+                  Categoria: <span className="font-medium text-foreground">{selectedCategory.name}</span>
+                </p>
+              </div>
+            )}
 
-          <div className="flex-1 overflow-y-auto p-3 space-y-4">
-            {variationGroups.map((group) => {
-              const selectedSet = groupSelections[group.id] ?? new Set<string>()
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+              {visibleProducts.map((product) => (
+                <button
+                  key={product.id}
+                  onClick={() => handleProductClick(product)}
+                  className="group text-left rounded-2xl border border-border bg-card hover:bg-accent hover:border-primary/30 transition-all p-4 min-h-[120px] flex flex-col"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-3xl">{product.emoji ?? '🍽️'}</span>
+                  </div>
 
-              return (
-                <div key={group.id} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-medium text-foreground">{group.name}</h3>
-                      <p className="text-xs text-muted-foreground">
-                        {group.selectionType === 'single'
-                          ? 'Escolha unica'
-                          : 'Escolha multipla'}
-                        {group.required ? ' • obrigatorio' : ' • opcional'}
+                  <div className="mt-3 flex-1">
+                    <h3 className="font-semibold text-foreground leading-tight">
+                      {product.name}
+                    </h3>
+
+                    {product.description && (
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                        {product.description}
                       </p>
-                    </div>
-
-                    {!isGroupSatisfied(group) && (
-                      <span className="px-2 py-0.5 bg-warning/20 text-warning text-xs rounded">
-                        obrigatório
-                      </span>
                     )}
                   </div>
 
-                  <div className="space-y-2">
-                    {group.options.map((option) => {
-                      const isSelected = selectedSet.has(option.id)
-                      const finalPrice = getProjectedTotal(group, option.id)
+                  <div className="mt-3">
+                    <p className="text-sm font-bold text-primary">
+                      {formatBRL(product.price)}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
 
-                      return (
-                        <button
-                          key={option.id}
-                          onClick={() => handleOptionToggle(group, option.id)}
-                          className={`w-full flex items-center justify-between p-4 rounded-lg hover:bg-secondary/80 active:scale-[0.98] transition-all border ${
-                            isSelected
-                              ? 'bg-primary/20 border-primary'
-                              : 'bg-secondary border-border hover:border-primary/50'
-                          }`}
-                        >
-                          <div className="text-left">
-                            <span className="font-medium text-foreground">
-                              {option.name}
-                            </span>
-                          </div>
+      {selectedProduct && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-card border border-border shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">
+                  {selectedProduct.name}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Escolha as variações do produto
+                </p>
+              </div>
 
-                          <div className="text-right">
-                            <span className="font-bold text-primary">
-                              {formatBRL(finalPrice)}
-                            </span>
-                            {option.priceModifier !== 0 && (
+              <button
+                onClick={() => {
+                  setSelectedProduct(null)
+                  setSelectedVariations([])
+                }}
+                className="h-9 w-9 rounded-lg flex items-center justify-center hover:bg-secondary transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="max-h-[70vh] overflow-y-auto p-5 space-y-5">
+              {selectedProduct.variationGroups?.map((group) => {
+                const selection = selectedVariations.find((s) => s.groupId === group.id)
+
+                return (
+                  <div key={group.id} className="space-y-3">
+                    <div>
+                      <h3 className="font-semibold text-foreground">
+                        {group.name}
+                        {group.required && (
+                          <span className="ml-2 text-xs text-warning">(obrigatório)</span>
+                        )}
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        {group.selectionType === 'single'
+                          ? 'Selecione uma opção'
+                          : 'Selecione uma ou mais opções'}
+                      </p>
+                    </div>
+
+                    <div className="grid gap-2">
+                      {group.options.map((option) => {
+                        const isSelected =
+                          selection?.selectedOptionIds.includes(option.id) ?? false
+
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() =>
+                              handleToggleOption(group.id, option.id, group.selectionType)
+                            }
+                            className={`flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
+                              isSelected
+                                ? 'border-primary bg-primary/10'
+                                : 'border-border bg-background hover:bg-secondary'
+                            }`}
+                          >
+                            <div>
+                              <p className="font-medium text-foreground">{option.name}</p>
                               <p className="text-xs text-muted-foreground">
-                                {option.priceModifier > 0 ? '+' : ''}
+                                {option.priceModifier >= 0 ? '+' : ''}
                                 {formatBRL(option.priceModifier)}
                               </p>
-                            )}
-                          </div>
-                        </button>
-                      )
-                    })}
+                            </div>
+
+                            <div className="text-right">
+                              <p className="text-xs text-muted-foreground">Total com esta opção</p>
+                              <p className="text-sm font-semibold text-primary">
+                                {formatBRL(getRunningPriceForGroup(group.id, option.id))}
+                              </p>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                </div>
-              )
-            })}
-          </div>
+                )
+              })}
+            </div>
 
-          <div className="p-3 border-t border-border space-y-2">
-            <button
-              onClick={handleAddSelected}
-              disabled={!allRequiredGroupsSatisfied}
-              className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Adicionar
-            </button>
+            <div className="flex items-center justify-between gap-4 px-5 py-4 border-t border-border bg-card">
+              <div>
+                <p className="text-sm text-muted-foreground">Preço final</p>
+                <p className="text-xl font-bold text-primary">
+                  {formatBRL(getRunningPriceForGroup('', ''))}
+                </p>
+              </div>
 
-            {!variationGroups.some((group) => group.required) && (
-              <button
-                onClick={handleAddWithoutVariation}
-                className="w-full py-3 bg-secondary text-foreground rounded-lg font-medium hover:bg-secondary/80 transition-colors"
-              >
-                Adicionar sem opcoes
-              </button>
-            )}
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedProduct(null)
+                    setSelectedVariations([])
+                  }}
+                >
+                  Cancelar
+                </Button>
+
+                <Button 
+                  onClick={handleConfirmVariations}
+                  className="bg-primary text-primary-foreground hover:bg-primary/80"
+                >
+                  Adicionar ao pedido
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }

@@ -65,7 +65,7 @@ export async function createProduct(req: AuthRequest, res: Response) {
 
     return res.status(201).json(product)
   } catch (error: any) {
-    console.error(error)
+    console.error('createProduct error:', error)
 
     if (error?.message === 'CATEGORY_NOT_FOUND') {
       return res.status(400).json({ error: 'Category not found' })
@@ -75,7 +75,15 @@ export async function createProduct(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: 'Category is required' })
     }
 
-    return res.status(500).json({ error: 'Failed to create product' })
+    if (error?.code === 'P2002') {
+      return res.status(400).json({
+        error: 'A product with this name already exists in this company',
+      })
+    }
+
+    return res.status(500).json({
+      error: error?.message || 'Failed to create product',
+    })
   }
 }
 
@@ -117,12 +125,14 @@ export async function deleteProduct(req: AuthRequest, res: Response) {
     await productsService.deleteProduct(id, companyId)
     return res.json({ ok: true })
   } catch (error: any) {
-    console.error(error)
+    console.error('deleteProduct error:', error)
 
     if (error?.message === 'PRODUCT_NOT_FOUND') {
       return res.status(404).json({ error: 'Product not found' })
     }
 
-    return res.status(500).json({ error: 'Failed to delete product' })
+    return res.status(500).json({
+      error: error?.message || 'Failed to delete product',
+    })
   }
 }

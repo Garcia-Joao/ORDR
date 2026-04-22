@@ -5,6 +5,8 @@ import bcrypt from 'bcryptjs'
 import authRouter from './routes/auth.routes'
 import productsRouter from './routes/products.routes'
 import categoriesRouter from './routes/categories.routes'
+import ordersRouter from './routes/orders.routes'
+import companiesRouter from './routes/companies.routes'
 import { prisma } from './lib/prisma'
 
 const app = express()
@@ -22,7 +24,8 @@ app.use(express.json())
 app.use('/auth', authRouter)
 app.use('/products', productsRouter)
 app.use('/categories', categoriesRouter)
-
+app.use('/orders', ordersRouter)
+app.use('/companies', companiesRouter)
 app.get('/seed-user', async (_req, res) => {
   try {
     let company = await prisma.company.findFirst({

@@ -37,6 +37,7 @@ export interface OrderItem {
 export interface Order {
   id: string
   comanda: number
+  comandaName?: string | null
   items: OrderItem[]
   total: number
   status: 'pending' | 'paid' | 'cancelled'

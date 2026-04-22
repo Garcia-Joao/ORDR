@@ -6,59 +6,51 @@ datasource db {
   provider = "postgresql"
 }
 
-enum UserRole {
-  admin
-  cashier
-  waiter
-}
-
-enum SelectionType {
-  single
-  multiple
-}
-
-enum OrderStatus {
-  pending
-  paid
-  cancelled
-}
-
 model Company {
-  id         String     @id @default(cuid())
-  name       String
-  createdAt  DateTime   @default(now())
-
-  products   Product[]
-  categories Category[]
-  orders     Order[]
-  users      User[]
+  id          String        @id @default(cuid())
+  name        String
+  isTest      Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  categories  Category[]
+  orders      Order[]
+  products    Product[]
+  memberships UserCompany[]
 }
 
 model User {
-  id         String    @id @default(cuid())
-  companyId  String
-  username   String
-  password   String
-  role       UserRole  @default(admin)
-  createdAt  DateTime  @default(now())
+  id          String        @id @default(cuid())
+  username    String        @unique
+  password    String
+  createdAt   DateTime      @default(now())
+  role        UserRole      @default(admin)
+  memberships UserCompany[]
+}
 
-  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+model UserCompany {
+  id        String   @id @default(cuid())
+  userId    String
+  companyId String
+  role      UserRole @default(admin)
+  createdAt DateTime @default(now())
 
-  @@unique([companyId, username])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+  @@index([userId])
   @@index([companyId])
 }
 
 model Category {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   companyId String
   name      String
   slug      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   emoji     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  products Product[]
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products  Product[]
 
   @@index([companyId])
 }
@@ -74,63 +66,60 @@ model Product {
   active          Boolean                 @default(true)
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
-
-  company         Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  category        Category?               @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  variationGroups ProductVariationGroup[]
   orderItems      OrderItem[]
+  category        Category?               @relation(fields: [categoryId], references: [id])
+  company         Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  variationGroups ProductVariationGroup[]
 
+  @@unique([companyId, name])
   @@index([companyId])
   @@index([categoryId])
-  @@unique([companyId, name])
 }
 
 model ProductVariationGroup {
-  id             String                       @id @default(cuid())
+  id             String                        @id @default(cuid())
   productId      String
   name           String
+  required       Boolean                       @default(false)
+  sortOrder      Int                           @default(0)
+  createdAt      DateTime                      @default(now())
+  updatedAt      DateTime                      @updatedAt
   selectionType  SelectionType
-  required       Boolean                      @default(false)
-  sortOrder      Int                          @default(0)
-  createdAt      DateTime                     @default(now())
-  updatedAt      DateTime                     @updatedAt
-
-  product        Product                      @relation(fields: [productId], references: [id], onDelete: Cascade)
-  options        ProductVariationOption[]
   itemSelections OrderItemVariationSelection[]
+  product        Product                       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  options        ProductVariationOption[]
 
-  @@index([productId])
   @@unique([productId, name])
+  @@index([productId])
 }
 
 model ProductVariationOption {
   id              String                              @id @default(cuid())
   groupId         String
   name            String
-  priceModifier   Decimal                             @db.Decimal(10, 2) @default(0)
+  priceModifier   Decimal                             @default(0) @db.Decimal(10, 2)
   sortOrder       Int                                 @default(0)
   active          Boolean                             @default(true)
   createdAt       DateTime                            @default(now())
   updatedAt       DateTime                            @updatedAt
-
-  group           ProductVariationGroup               @relation(fields: [groupId], references: [id], onDelete: Cascade)
   selectedInItems OrderItemVariationSelectionOption[]
+  group           ProductVariationGroup               @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
-  @@index([groupId])
   @@unique([groupId, name])
+  @@index([groupId])
 }
 
 model Order {
-  id         String      @id
-  companyId  String
-  comanda    Int
-  total      Decimal     @db.Decimal(10, 2)
-  status     OrderStatus
-  createdAt  DateTime    @default(now())
-  paidAt     DateTime?
-
-  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  items      OrderItem[]
+  id        String      @id
+  companyId String
+  comanda   Int
+  comandaName String?
+  total     Decimal     @db.Decimal(10, 2)
+  createdAt DateTime    @default(now())
+  paidAt    DateTime?
+  status    OrderStatus
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  items     OrderItem[]
 
   @@index([companyId])
   @@index([createdAt])
@@ -138,48 +127,62 @@ model Order {
 }
 
 model OrderItem {
-  id          String                          @id @default(cuid())
-  orderId     String
-  productId   String
-  quantity    Int
-  unitPrice   Decimal                         @db.Decimal(10, 2)
-  totalPrice  Decimal                         @db.Decimal(10, 2)
-  notes       String?
-  createdAt   DateTime                        @default(now())
-
-  order       Order                           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product     Product                         @relation(fields: [productId], references: [id], onDelete: Restrict)
-  variations  OrderItemVariationSelection[]
+  id         String                        @id @default(cuid())
+  orderId    String
+  productId  String
+  quantity   Int
+  unitPrice  Decimal                       @db.Decimal(10, 2)
+  totalPrice Decimal                       @db.Decimal(10, 2)
+  notes      String?
+  createdAt  DateTime                      @default(now())
+  order      Order                         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product    Product                       @relation(fields: [productId], references: [id])
+  variations OrderItemVariationSelection[]
 
   @@index([orderId])
   @@index([productId])
 }
 
 model OrderItemVariationSelection {
-  id          String                               @id @default(cuid())
+  id          String                              @id @default(cuid())
   orderItemId String
   groupId     String
-  createdAt   DateTime                             @default(now())
-
-  orderItem   OrderItem                            @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  group       ProductVariationGroup                @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  createdAt   DateTime                            @default(now())
+  group       ProductVariationGroup               @relation(fields: [groupId], references: [id])
+  orderItem   OrderItem                           @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   options     OrderItemVariationSelectionOption[]
 
+  @@unique([orderItemId, groupId])
   @@index([orderItemId])
   @@index([groupId])
-  @@unique([orderItemId, groupId])
 }
 
 model OrderItemVariationSelectionOption {
-  id            String                         @id @default(cuid())
+  id            String                      @id @default(cuid())
   selectionId   String
   optionId      String
-  priceModifier Decimal                        @db.Decimal(10, 2)
+  priceModifier Decimal                     @db.Decimal(10, 2)
+  option        ProductVariationOption      @relation(fields: [optionId], references: [id])
+  selection     OrderItemVariationSelection @relation(fields: [selectionId], references: [id], onDelete: Cascade)
 
-  selection     OrderItemVariationSelection    @relation(fields: [selectionId], references: [id], onDelete: Cascade)
-  option        ProductVariationOption         @relation(fields: [optionId], references: [id], onDelete: Restrict)
-
+  @@unique([selectionId, optionId])
   @@index([selectionId])
   @@index([optionId])
-  @@unique([selectionId, optionId])
+}
+
+enum UserRole {
+  admin
+  cashier
+  waiter
+}
+
+enum SelectionType {
+  single
+  multiple
+}
+
+enum OrderStatus {
+  pending
+  paid
+  cancelled
 }

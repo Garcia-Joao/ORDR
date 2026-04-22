@@ -1,6 +1,6 @@
 'use client'
 
-import { Minus, Plus, Trash2, CreditCard, Receipt, X, Printer } from 'lucide-react'
+import { Minus, Plus, Trash2, Receipt, X, Printer, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { OrderItem } from '@/lib/pos-types'
 import { formatBRL, getItemPrice } from '@/lib/pos-types'
@@ -8,15 +8,21 @@ import { formatBRL, getItemPrice } from '@/lib/pos-types'
 interface OrderPanelProps {
   items: OrderItem[]
   orderId: string | null
-  comanda: number | null
+  comandaNumber: number | null
+  comandaName: string
+  applyTax: boolean
+  requireComanda: boolean
+  taxRate?: number
   onUpdateQuantity: (itemKey: string, delta: number) => void
   onRemoveItem: (itemKey: string) => void
   onClearOrder: () => void
   onCharge: () => void
-  onSetComanda: (comanda: number | null) => void
+  onSetComandaNumber: (comanda: number | null) => void
+  onSetComandaName: (name: string) => void
+  onSetApplyTax: (value: boolean) => void
+  isLoading?: boolean
 }
 
-// Same key logic used in POSPage
 function getItemKey(item: OrderItem): string {
   const selections = (item.variationSelections ?? [])
     .map((selection) => ({
@@ -53,19 +59,29 @@ function getVariationLabels(item: OrderItem): string[] {
 export function OrderPanel({
   items,
   orderId,
-  comanda,
+  comandaNumber,
+  comandaName,
+  applyTax,
+  requireComanda,
+  taxRate = 0.1,
   onUpdateQuantity,
   onRemoveItem,
   onClearOrder,
   onCharge,
-  onSetComanda,
+  onSetComandaNumber,
+  onSetComandaName,
+  onSetApplyTax,
+  isLoading = false,
 }: OrderPanelProps) {
   const subtotal = items.reduce(
     (sum, item) => sum + getItemPrice(item) * item.quantity,
     0
   )
-  const tax = subtotal * 0.08
+
+  const tax = applyTax ? subtotal * taxRate : 0
   const total = subtotal + tax
+
+  const isComandaValid = !requireComanda || comandaNumber !== null
 
   return (
     <div className="w-95 flex flex-col bg-card border-l border-border">
@@ -78,12 +94,14 @@ export function OrderPanel({
             </p>
           )}
         </div>
+
         {items.length > 0 && (
           <Button
             variant="ghost"
             size="sm"
             onClick={onClearOrder}
-            className="text-muted-foreground hover:text-destructive"
+            disabled={isLoading}
+            className="text-muted-foreground hover:text-destructive disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <X className="h-4 w-4 mr-1" />
             Limpar
@@ -91,22 +109,39 @@ export function OrderPanel({
         )}
       </div>
 
-      <div className="px-5 py-3 border-b border-border bg-secondary/50">
-        <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-          Comanda
-        </label>
-        <div className="flex gap-2">
+      <div className="px-5 py-3 border-b border-border bg-secondary/50 space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+            Número da comanda
+          </label>
+
           <input
             type="number"
             min="1"
-            max="999"
-            value={comanda ?? ''}
+            max="999999"
+            value={comandaNumber ?? ''}
+            disabled={isLoading}
             onChange={(e) => {
               const val = e.target.value
-              onSetComanda(val ? parseInt(val, 10) : null)
+              onSetComandaNumber(val ? parseInt(val, 10) : null)
             }}
             placeholder="N° da comanda"
-            className="flex-1 h-10 px-3 rounded-lg bg-background border border-border text-foreground text-sm font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full h-10 px-3 rounded-lg bg-background border border-border text-foreground text-sm font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+            Nome da comanda
+          </label>
+
+          <input
+            type="text"
+            value={comandaName}
+            disabled={isLoading}
+            onChange={(e) => onSetComandaName(e.target.value)}
+            placeholder="Ex: João / Mesa 3 / Cliente balcão"
+            className="w-full h-10 px-3 rounded-lg bg-background border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
       </div>
@@ -158,7 +193,8 @@ export function OrderPanel({
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => onUpdateQuantity(itemKey, -1)}
-                      className="h-8 w-8 flex items-center justify-center rounded-md bg-muted hover:bg-muted/80 text-foreground transition-colors"
+                      disabled={isLoading}
+                      className="h-8 w-8 flex items-center justify-center rounded-md bg-muted hover:bg-muted/80 text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Minus className="h-4 w-4" />
                     </button>
@@ -169,14 +205,16 @@ export function OrderPanel({
 
                     <button
                       onClick={() => onUpdateQuantity(itemKey, 1)}
-                      className="h-8 w-8 flex items-center justify-center rounded-md bg-muted hover:bg-muted/80 text-foreground transition-colors"
+                      disabled={isLoading}
+                      className="h-8 w-8 flex items-center justify-center rounded-md bg-muted hover:bg-muted/80 text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Plus className="h-4 w-4" />
                     </button>
 
                     <button
                       onClick={() => onRemoveItem(itemKey)}
-                      className="h-8 w-8 flex items-center justify-center rounded-md text-destructive hover:bg-destructive/20 transition-colors ml-1"
+                      disabled={isLoading}
+                      className="h-8 w-8 flex items-center justify-center rounded-md text-destructive hover:bg-destructive/20 transition-colors ml-1 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -193,10 +231,23 @@ export function OrderPanel({
           <span>Subtotal</span>
           <span>{formatBRL(subtotal)}</span>
         </div>
-        <div className="flex justify-between text-sm text-muted-foreground">
-          <span>Taxa (8%)</span>
+
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span>Taxa ({Math.round(taxRate * 100)}%)</span>
+            <input
+              type="checkbox"
+              checked={applyTax}
+              disabled={isLoading}
+              onChange={(e) => onSetApplyTax(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-primary"
+              title="Aplicar taxa"
+            />
+          </div>
+
           <span>{formatBRL(tax)}</span>
         </div>
+
         <div className="flex justify-between text-xl font-bold text-foreground pt-2 border-t border-border">
           <span>Total</span>
           <span className="text-primary">{formatBRL(total)}</span>
@@ -206,16 +257,25 @@ export function OrderPanel({
       <div className="p-5 pt-0">
         <Button
           onClick={onCharge}
-          disabled={items.length === 0 || comanda === null}
+          disabled={isLoading || items.length === 0 || !isComandaValid}
           className="w-full h-14 text-lg font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <Printer className="h-5 w-5 mr-2" />
-          Imprimir
+          {isLoading ? (
+            <>
+              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+              Salvando...
+            </>
+          ) : (
+            <>
+              <Printer className="h-5 w-5 mr-2" />
+              Imprimir
+            </>
+          )}
         </Button>
 
-        {items.length > 0 && comanda === null && (
+        {items.length > 0 && requireComanda && comandaNumber === null && !isLoading && (
           <p className="text-xs text-center text-warning mt-2">
-            Informe o numero da comanda
+            Informe o número da comanda
           </p>
         )}
       </div>

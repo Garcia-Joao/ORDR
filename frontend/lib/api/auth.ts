@@ -1,18 +1,22 @@
 import { apiFetch } from './client'
 
-export interface AuthUser {
+export type AuthCompany = {
+  id: string
+  name: string
+  isTest: boolean
+  role: string
+}
+
+export type AuthUser = {
   id: string
   username: string
   role: string
   companyId: string
-}
-
-export interface LoginResponse {
-  user: AuthUser
+  companies: AuthCompany[]
 }
 
 export function login(username: string, password: string) {
-  return apiFetch<LoginResponse>('/auth/login', {
+  return apiFetch<{ user: AuthUser }>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
   })
@@ -24,8 +28,13 @@ export function logout() {
   })
 }
 
-export function me() {
-  return apiFetch<{ user: AuthUser }>('/auth/me', {
-    method: 'GET',
+export function getMe() {
+  return apiFetch<{ user: AuthUser }>('/auth/me')
+}
+
+export function switchCompany(companyId: string) {
+  return apiFetch<{ user: AuthUser }>('/auth/switch-company', {
+    method: 'POST',
+    body: JSON.stringify({ companyId }),
   })
 }

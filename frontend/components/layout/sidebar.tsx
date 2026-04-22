@@ -13,8 +13,11 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Download,
+  Loader2,
 } from 'lucide-react'
 import { useState } from 'react'
+import { downloadOrdersReportPdf } from '@/lib/api/orders-report'
 
 const navItems = [
   { href: '/PDV', icon: ShoppingCart, label: 'PDV', description: 'Ponto de Venda' },
@@ -30,6 +33,20 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const [isDownloadingReport, setIsDownloadingReport] = useState(false)
+
+  const handleDownloadReport = async () => {
+    try {
+      setIsDownloadingReport(true)
+      await downloadOrdersReportPdf()
+    } catch (error: any) {
+      console.error('Erro ao baixar relatório:', error)
+      alert(error?.message || 'Erro ao baixar relatório')
+    } finally {
+      setIsDownloadingReport(false)
+    }
+  }
+
   return (
     <aside
       className={`flex flex-col h-screen bg-sidebar border-r border-sidebar-border transition-all duration-300 ${
@@ -56,6 +73,7 @@ export function Sidebar() {
         <ul className="flex flex-col gap-1 px-2">
           {navItems.map((item) => {
             const isActive = pathname === item.href
+
             return (
               <li key={item.href}>
                 <Link
@@ -72,7 +90,9 @@ export function Sidebar() {
                     <div className="flex flex-col">
                       <span className="text-sm font-medium">{item.label}</span>
                       {!isActive && (
-                        <span className="text-xs text-sidebar-foreground/50">{item.description}</span>
+                        <span className="text-xs text-sidebar-foreground/50">
+                          {item.description}
+                        </span>
                       )}
                     </div>
                   )}
@@ -82,6 +102,30 @@ export function Sidebar() {
           })}
         </ul>
       </nav>
+
+      {/* Report Download Button */}
+      <div className="p-2 border-t border-sidebar-border">
+        <button
+          onClick={handleDownloadReport}
+          disabled={isDownloadingReport}
+          className={`flex items-center w-full py-2 rounded-lg transition-colors text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed ${
+            collapsed ? 'justify-center px-2' : 'justify-start px-3'
+          }`}
+          title={collapsed ? 'Baixar relatório PDF' : undefined}
+        >
+          {isDownloadingReport ? (
+            <Loader2 className="h-5 w-5 animate-spin flex-shrink-0" />
+          ) : (
+            <Download className="h-5 w-5 flex-shrink-0" />
+          )}
+
+          {!collapsed && (
+            <span className="ml-3 text-sm font-medium">
+              {isDownloadingReport ? 'Baixando PDF...' : 'Relatório PDF'}
+            </span>
+          )}
+        </button>
+      </div>
 
       {/* Collapse Button */}
       <div className="p-2 border-t border-sidebar-border">

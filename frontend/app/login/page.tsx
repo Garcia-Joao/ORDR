@@ -14,7 +14,8 @@ export default function LoginPage() {
 
 const handleLogin = async () => {
   try {
-    await login(username, password)
+    const result = await login(username, password)
+    localStorage.setItem('ordr-user', JSON.stringify(result.user))
     router.push('/PDV')
   } catch (err) {
     setError('Usuário ou senha inválidos')

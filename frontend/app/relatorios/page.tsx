@@ -1,246 +1,331 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   BarChart3,
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
   ShoppingCart,
-  Users,
+  Wallet,
+  Package,
+  TrendingUp,
   Calendar,
 } from 'lucide-react'
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
+} from 'recharts'
+import { getOrdersReportSummary, type OrdersReportSummary } from '@/lib/api/reports'
 
-function formatCurrency(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+function formatBRL(value: number) {
+  return value.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  })
 }
 
-const DAILY_SALES = [
-  { day: 'Seg', sales: 1250 },
-  { day: 'Ter', sales: 980 },
-  { day: 'Qua', sales: 1420 },
-  { day: 'Qui', sales: 1680 },
-  { day: 'Sex', sales: 2340 },
-  { day: 'Sáb', sales: 3150 },
-  { day: 'Dom', sales: 2890 },
-]
-
-const TOP_PRODUCTS = [
-  { name: 'Heineken', quantity: 145, revenue: 1740 },
-  { name: 'Caipirinha', quantity: 98, revenue: 1960 },
-  { name: 'Picanha', quantity: 67, revenue: 4020 },
-  { name: 'Brahma', quantity: 120, revenue: 960 },
-  { name: 'Gin Tonica', quantity: 52, revenue: 1300 },
-]
-
-const PAYMENT_METHODS = [
-  { method: 'Cartão de Crédito', percentage: 45, amount: 6120 },
-  { method: 'PIX', percentage: 35, amount: 4760 },
-  { method: 'Cartão de Débito', percentage: 15, amount: 2040 },
-  { method: 'Dinheiro', percentage: 5, amount: 680 },
-]
+function toDateInputValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
 export default function RelatoriosPage() {
-  const [period, setPeriod] = useState<'today' | 'week' | 'month'>('week')
+  const [data, setData] = useState<OrdersReportSummary | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [fromDate, setFromDate] = useState(() => toDateInputValue(new Date()))
+  const [toDate, setToDate] = useState(() => toDateInputValue(new Date()))
 
-  const maxSales = Math.max(...DAILY_SALES.map((d) => d.sales))
-  const totalWeekSales = DAILY_SALES.reduce((sum, d) => sum + d.sales, 0)
-  const avgDailySales = totalWeekSales / 7
+  const fromDateRef = useRef<HTMLInputElement>(null)
+  const toDateRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    async function load() {
+      try {
+        setIsLoading(true)
+        const summary = await getOrdersReportSummary(
+          fromDate || undefined,
+          toDate || undefined
+        )
+        setData(summary)
+      } catch (error) {
+        console.error('Erro ao carregar relatórios:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    load()
+  }, [fromDate, toDate])
+
+  if (isLoading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <span className="text-muted-foreground">Carregando relatórios...</span>
+      </div>
+    )
+  }
+
+  if (!data) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <span className="text-muted-foreground">Não foi possível carregar os relatórios.</span>
+      </div>
+    )
+  }
+
+  const statusData = [
+    { name: 'Pendentes', value: data.summary.statusCounts.pending },
+    { name: 'Pagos', value: data.summary.statusCounts.paid },
+    { name: 'Cancelados', value: data.summary.statusCounts.cancelled },
+  ]
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card">
+    <div className="h-full overflow-y-auto bg-background p-6">
+      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
         <div className="flex items-center gap-3">
           <BarChart3 className="h-6 w-6 text-primary" />
-          <h1 className="text-xl font-semibold text-foreground">Relatórios</h1>
+          <h1 className="text-2xl font-bold text-foreground">Relatórios</h1>
         </div>
 
-        {/* Period Selector */}
-        <div className="flex items-center gap-2 bg-secondary rounded-lg p-1">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
+            <span className="text-sm text-muted-foreground">De</span>
+            <button
+              type="button"
+              onClick={() => fromDateRef.current?.showPicker?.()}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Calendar className="h-4 w-4" />
+            </button>
+            <input
+              ref={fromDateRef}
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="bg-transparent text-sm text-foreground outline-none"
+              max={toDate || undefined}
+            />
+          </div>
+
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
+            <span className="text-sm text-muted-foreground">Até</span>
+            <button
+              type="button"
+              onClick={() => toDateRef.current?.showPicker?.()}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Calendar className="h-4 w-4" />
+            </button>
+            <input
+              ref={toDateRef}
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="bg-transparent text-sm text-foreground outline-none"
+              min={fromDate || undefined}
+            />
+          </div>
+
           <button
-            onClick={() => setPeriod('today')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              period === 'today'
-                ? 'bg-card text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
+            onClick={() => {
+              const today = toDateInputValue(new Date())
+              setFromDate(today)
+              setToDate(today)
+            }}
+            className="px-3 py-2 rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/80 text-sm"
           >
             Hoje
           </button>
+
           <button
-            onClick={() => setPeriod('week')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              period === 'week'
-                ? 'bg-card text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
+            onClick={() => {
+              setFromDate('')
+              setToDate('')
+            }}
+            className="px-3 py-2 rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/80 text-sm"
           >
-            Semana
-          </button>
-          <button
-            onClick={() => setPeriod('month')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              period === 'month'
-                ? 'bg-card text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Mês
+            Limpar datas
           </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          <div className="bg-card rounded-xl border border-border p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-primary/10 rounded-lg">
-                <DollarSign className="h-5 w-5 text-primary" />
-              </div>
-              <div className="flex items-center gap-1 text-success text-sm">
-                <TrendingUp className="h-4 w-4" />
-                <span>+12%</span>
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground mb-1">Faturamento</p>
-            <p className="text-2xl font-bold text-foreground">{formatCurrency(totalWeekSales)}</p>
-          </div>
+      <div className="grid grid-cols-4 gap-4 mb-6">
+        <ReportCard
+          title="Total de Pedidos"
+          value={String(data.summary.totalOrders)}
+          icon={<ShoppingCart className="h-5 w-5" />}
+        />
+        <ReportCard
+          title="Faturamento"
+          value={formatBRL(data.summary.grossRevenue)}
+          icon={<Wallet className="h-5 w-5" />}
+        />
+        <ReportCard
+          title="Ticket Médio"
+          value={formatBRL(data.summary.averageTicket)}
+          icon={<TrendingUp className="h-5 w-5" />}
+        />
+        <ReportCard
+          title="Itens Vendidos"
+          value={String(data.summary.totalItemsSold)}
+          icon={<Package className="h-5 w-5" />}
+        />
+      </div>
 
-          <div className="bg-card rounded-xl border border-border p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-success/10 rounded-lg">
-                <ShoppingCart className="h-5 w-5 text-success" />
-              </div>
-              <div className="flex items-center gap-1 text-success text-sm">
-                <TrendingUp className="h-4 w-4" />
-                <span>+8%</span>
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground mb-1">Pedidos</p>
-            <p className="text-2xl font-bold text-foreground">342</p>
-          </div>
-
-          <div className="bg-card rounded-xl border border-border p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-warning/10 rounded-lg">
-                <Users className="h-5 w-5 text-warning" />
-              </div>
-              <div className="flex items-center gap-1 text-destructive text-sm">
-                <TrendingDown className="h-4 w-4" />
-                <span>-3%</span>
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground mb-1">Clientes Atendidos</p>
-            <p className="text-2xl font-bold text-foreground">186</p>
-          </div>
-
-          <div className="bg-card rounded-xl border border-border p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-chart-2/10 rounded-lg">
-                <Calendar className="h-5 w-5 text-chart-2" />
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground mb-1">Ticket Médio</p>
-            <p className="text-2xl font-bold text-foreground">{formatCurrency(avgDailySales / 49)}</p>
+      <div className="grid grid-cols-2 gap-6 mb-6">
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h2 className="text-lg font-semibold mb-4 text-foreground">Vendas por Dia</h2>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data.charts.salesByDay}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip
+                  formatter={(value: number, name: string) =>
+                    name === 'revenue' ? formatBRL(value) : value
+                  }
+                />
+                <Bar dataKey="revenue" name="revenue" radius={[6, 6, 0, 0]} fill='#8a3f03'/>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-6">
-          {/* Sales Chart */}
-          <div className="col-span-2 bg-card rounded-xl border border-border p-6">
-            <h2 className="text-lg font-semibold text-foreground mb-6">Vendas por Dia</h2>
-            <div className="flex items-end justify-between gap-4 h-64">
-              {DAILY_SALES.map((data) => (
-                <div key={data.day} className="flex-1 flex flex-col items-center gap-2">
-                  <div className="relative w-full flex items-end justify-center h-48">
-                    <div
-                      className="w-full max-w-[48px] bg-primary/80 hover:bg-primary rounded-t-lg transition-all cursor-pointer"
-                      style={{ height: `${(data.sales / maxSales) * 100}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground font-medium">{data.day}</span>
-                  <span className="text-xs text-foreground font-mono">{formatCurrency(data.sales)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Payment Methods */}
-          <div className="bg-card rounded-xl border border-border p-6">
-            <h2 className="text-lg font-semibold text-foreground mb-6">Formas de Pagamento</h2>
-            <div className="space-y-4">
-              {PAYMENT_METHODS.map((payment, index) => (
-                <div key={payment.method}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-foreground">{payment.method}</span>
-                    <span className="text-sm text-muted-foreground">{payment.percentage}%</span>
-                  </div>
-                  <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{
-                        width: `${payment.percentage}%`,
-                        backgroundColor: `var(--chart-${index + 1})`,
-                      }}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">{formatCurrency(payment.amount)}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Top Products */}
-          <div className="col-span-3 bg-card rounded-xl border border-border p-6">
-            <h2 className="text-lg font-semibold text-foreground mb-6">Produtos Mais Vendidos</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left pb-4 text-sm font-medium text-muted-foreground">Posição</th>
-                    <th className="text-left pb-4 text-sm font-medium text-muted-foreground">Produto</th>
-                    <th className="text-right pb-4 text-sm font-medium text-muted-foreground">Quantidade</th>
-                    <th className="text-right pb-4 text-sm font-medium text-muted-foreground">Receita</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {TOP_PRODUCTS.map((product, index) => (
-                    <tr key={product.name} className="border-b border-border last:border-0">
-                      <td className="py-4">
-                        <span
-                          className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${
-                            index === 0
-                              ? 'bg-primary text-primary-foreground'
-                              : index === 1
-                              ? 'bg-chart-2/20 text-chart-2'
-                              : index === 2
-                              ? 'bg-warning/20 text-warning'
-                              : 'bg-secondary text-secondary-foreground'
-                          }`}
-                        >
-                          {index + 1}
-                        </span>
-                      </td>
-                      <td className="py-4">
-                        <span className="font-medium text-foreground">{product.name}</span>
-                      </td>
-                      <td className="py-4 text-right">
-                        <span className="text-foreground">{product.quantity} unidades</span>
-                      </td>
-                      <td className="py-4 text-right">
-                        <span className="font-mono text-foreground">{formatCurrency(product.revenue)}</span>
-                      </td>
-                    </tr>
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h2 className="text-lg font-semibold mb-4 text-foreground">Pedidos por Status</h2>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={statusData}
+                  dataKey="value"
+                  nameKey="name"
+                  outerRadius={110}
+                  fill='#8a3f03'
+                  label
+                >
+                  {statusData.map((entry, index) => (
+                    <Cell key={index} />
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
           </div>
         </div>
       </div>
+
+      <div className="grid grid-cols-2 gap-6 mb-6">
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h2 className="text-lg font-semibold mb-4 text-foreground">
+            Top Produtos por Quantidade
+          </h2>
+          <div className="space-y-3">
+            {data.charts.topProductsByQuantity.map((product) => (
+              <div
+                key={product.productId}
+                className="flex items-center justify-between rounded-lg bg-secondary px-4 py-3"
+              >
+                <div>
+                  <p className="font-medium text-foreground">{product.name}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {product.quantity} unidades
+                  </p>
+                </div>
+                <span className="font-semibold text-primary">
+                  {formatBRL(product.revenue)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h2 className="text-lg font-semibold mb-4 text-foreground">
+            Top Produtos por Faturamento
+          </h2>
+          <div className="space-y-3">
+            {data.charts.topProductsByRevenue.map((product) => (
+              <div
+                key={product.productId}
+                className="flex items-center justify-between rounded-lg bg-secondary px-4 py-3"
+              >
+                <div>
+                  <p className="font-medium text-foreground">{product.name}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {product.quantity} unidades
+                  </p>
+                </div>
+                <span className="font-semibold text-primary">
+                  {formatBRL(product.revenue)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h2 className="text-lg font-semibold mb-4 text-foreground">Pedidos Recentes</h2>
+
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border text-left">
+                <th className="py-3 pr-4 text-sm text-muted-foreground">Pedido</th>
+                <th className="py-3 pr-4 text-sm text-muted-foreground">Comanda</th>
+                <th className="py-3 pr-4 text-sm text-muted-foreground">Itens</th>
+                <th className="py-3 pr-4 text-sm text-muted-foreground">Status</th>
+                <th className="py-3 pr-4 text-sm text-muted-foreground">Total</th>
+                <th className="py-3 pr-4 text-sm text-muted-foreground">Criado em</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.recentOrders.map((order) => (
+                <tr key={order.id} className="border-b border-border last:border-0">
+                  <td className="py-3 pr-4 font-mono text-sm">#{order.id}</td>
+                  <td className="py-3 pr-4">{order.comanda}</td>
+                  <td className="py-3 pr-4">{order.itemsCount}</td>
+                  <td className="py-3 pr-4 capitalize">{order.status}</td>
+                  <td className="py-3 pr-4 font-medium">{formatBRL(order.total)}</td>
+                  <td className="py-3 pr-4">
+                    {new Date(order.createdAt).toLocaleString('pt-BR')}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ReportCard({
+  title,
+  value,
+  icon,
+}: {
+  title: string
+  value: string
+  icon: React.ReactNode
+}) {
+  return (
+    <div className="bg-card border border-border rounded-xl p-5">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm text-muted-foreground">{title}</span>
+        <div className="text-muted-foreground">{icon}</div>
+      </div>
+      <p className="text-2xl font-bold text-foreground">{value}</p>
     </div>
   )
 }

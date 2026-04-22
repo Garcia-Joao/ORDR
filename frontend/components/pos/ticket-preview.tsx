@@ -44,18 +44,18 @@ function getVariationLabels(item: OrderItem): string[] {
 }
 
 export function TicketPreview({ order, onClose, onPrint }: TicketPreviewProps) {
-const items = Array.isArray(order.items) ? order.items : []
-const orderTotal = Number(order.total ?? 0)
-const createdAt =
-  order.createdAt instanceof Date
-    ? order.createdAt
-    : new Date(order.createdAt)
+  const items = Array.isArray(order.items) ? order.items : []
+  const orderTotal = Number(order.total ?? 0)
+  const createdAt =
+    order.createdAt instanceof Date
+      ? order.createdAt
+      : new Date(order.createdAt)
 
   const subtotal = items.reduce(
     (sum, item) => sum + Number(getItemPrice(item) ?? 0) * item.quantity,
     0
   )
-  const tax = subtotal * 0.08
+  const tax = subtotal * 0.1
 
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
@@ -146,7 +146,7 @@ const createdAt =
                 <span>{formatBRL(subtotal)}</span>
               </div>
               <div className="flex justify-between text-xs opacity-70">
-                <span>Taxa (8%)</span>
+                <span>Taxa (10%)</span>
                 <span>{formatBRL(tax)}</span>
               </div>
               <div className="flex justify-between font-bold text-lg pt-2 border-t border-dashed border-background/30">
@@ -191,7 +191,10 @@ const createdAt =
           <Button variant="outline" onClick={onClose} className="flex-1">
             Fechar
           </Button>
-          <Button onClick={onPrint} className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90">
+          <Button
+            onClick={onPrint}
+            className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
+          >
             <Printer className="h-4 w-4 mr-2" />
             Imprimir
           </Button>
