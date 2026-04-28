@@ -38,11 +38,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className="dark bg-background">
       <body className="font-sans antialiased min-h-screen">
-        
-        <AppShell>
-          {children}
-        </AppShell>
-
+        <AppShell>{children}</AppShell>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

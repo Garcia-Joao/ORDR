@@ -1,26 +1,36 @@
-export interface ProductVariationOption {
+export type Product = {
   id: string
-  name: string
-  priceModifier: number // can be positive, negative, or zero
-}
-
-export interface ProductVariationGroup {
-  id: string
-  name: string
-  required: boolean
-  selectionType: 'single' | 'multiple'
-  options: ProductVariationOption[]
-}
-
-export interface Product {
-  id: string
+  categoryId: string
   name: string
   description?: string | null
+  emoji: string
   price: number
-  categoryId?: string | null
-  emoji?: string | null
   active?: boolean
+
+  isStockOnly?: boolean
+  trackStock?: boolean
+  stockQuantity?: number
+  minStock?: number
+
+
+
+  costMode?: ProductCostMode
+  simpleCost?: number | null
+  stockUnit?: StockUnit | null
+  referenceQuantity?: number | null
+  referenceCost?: number | null
+  unitContentQuantity?: number | null
+  unitContentUnit?: StockUnit | null
+
+  madeOnDemand?: boolean
+  unlimitedStock?: boolean
+  recipeOutputQuantity?: number | null
+  recipeOutputUnit?: StockUnit | null
+
+  recipeItems?: ProductRecipeItem[]
   variationGroups?: ProductVariationGroup[]
+  environmentPrices?: ProductEnvironmentPrice[]
+  category?: CategoryConfig
 }
 
 export interface OrderItemVariationSelection {
@@ -32,17 +42,64 @@ export interface OrderItem {
   product: Product
   quantity: number
   variationSelections?: OrderItemVariationSelection[]
+  notes?: string | null
 }
 
-export interface Order {
+export type PaymentMethod = 'money' | 'pix' | 'credit' | 'debit'
+
+export type InternalCustomer = {
+  id: string
+  name: string
+  phone?: string | null
+  active?: boolean
+  salesEnvironmentId?: string | null
+  salesEnvironment?: {
+    id: string
+    name: string
+    color?: string | null
+    isDefault?: boolean
+  } | null
+}
+
+export type ProductVariationOption = {
+  id: string
+  groupId?: string
+  name: string
+  priceModifier: number
+  sortOrder?: number
+  active?: boolean
+
+  costMode?: 'simple' | 'recipe'
+  simpleCost?: number | null
+  stockUnit?: StockUnit | null
+  referenceQuantity?: number | null
+  referenceCost?: number | null
+
+  environmentPrices?: ProductVariationOptionEnvironmentPrice[]
+  recipeItems?: ProductVariationOptionRecipeItem[]
+}
+
+export type Order = {
   id: string
   comanda: number
   comandaName?: string | null
+  observation?: string | null
+  notes?: string | null
+  internalCustomerId?: string | null
   items: OrderItem[]
   total: number
+  paymentMethod?: PaymentMethod | null
+  taxApplied: boolean
   status: 'pending' | 'paid' | 'cancelled'
   createdAt: Date
   paidAt?: Date
+  customerId?: string | null
+  customer?: {
+    id: string
+    name: string
+    phone?: string | null
+    email?: string | null
+  } | null
 }
 
 export interface CategoryConfig {
@@ -61,22 +118,62 @@ export function formatBRL(value: number | null | undefined): string {
   })
 }
 
-// Get item final price (product price + variation modifier)
-export function getItemPrice(item: OrderItem): number {
-  const basePrice = item.product.price
+export function getProductBasePriceForEnvironment(
+  product: Product,
+  salesEnvironmentId?: string | null
+): number {
+  if (!salesEnvironmentId) {
+    return Number(product.price ?? 0)
+  }
+
+  const environmentPrice = product.environmentPrices?.find(
+    (item) => item.salesEnvironmentId === salesEnvironmentId
+  )
+
+  return Number(environmentPrice?.price ?? product.price ?? 0)
+}
+
+export function getVariationOptionPriceModifierForEnvironment(
+  option: ProductVariationOption,
+  salesEnvironmentId?: string | null
+): number {
+  if (!salesEnvironmentId) {
+    return Number(option.priceModifier ?? 0)
+  }
+
+  const environmentPrice = option.environmentPrices?.find(
+    (item) => item.salesEnvironmentId === salesEnvironmentId
+  )
+
+  return Number(environmentPrice?.priceModifier ?? option.priceModifier ?? 0)
+}
+
+export function getItemPrice(
+  item: OrderItem,
+  salesEnvironmentId?: string | null
+): number {
+  const basePrice = getProductBasePriceForEnvironment(
+    item.product,
+    salesEnvironmentId
+  )
+
   const groups = item.product.variationGroups ?? []
   const selections = item.variationSelections ?? []
 
   let totalModifier = 0
 
   for (const selection of selections) {
-    const group = groups.find(g => g.id === selection.groupId)
+    const group = groups.find((g) => g.id === selection.groupId)
     if (!group) continue
 
     for (const optionId of selection.selectedOptionIds) {
-      const option = group.options.find(o => o.id === optionId)
+      const option = group.options.find((o) => o.id === optionId)
       if (!option) continue
-      totalModifier += option.priceModifier ?? 0
+
+      totalModifier += getVariationOptionPriceModifierForEnvironment(
+        option,
+        salesEnvironmentId
+      )
     }
   }
 
@@ -89,7 +186,7 @@ export function validateOrderItem(item: OrderItem): string[] {
   const selections = item.variationSelections ?? []
 
   for (const group of groups) {
-    const selection = selections.find(s => s.groupId === group.id)
+    const selection = selections.find((s) => s.groupId === group.id)
     const selectedCount = selection?.selectedOptionIds.length ?? 0
 
     if (group.required && selectedCount === 0) {
@@ -103,7 +200,7 @@ export function validateOrderItem(item: OrderItem): string[] {
 
     if (selection) {
       for (const optionId of selection.selectedOptionIds) {
-        const exists = group.options.some(o => o.id === optionId)
+        const exists = group.options.some((o) => o.id === optionId)
         if (!exists) {
           errors.push(`Opção inválida em ${group.name}: ${optionId}`)
         }
@@ -114,7 +211,93 @@ export function validateOrderItem(item: OrderItem): string[] {
   return errors
 }
 
-// Sample orders for history
 export function generateSampleOrders(): Order[] {
   return []
+}
+
+export type StockUnit = 'unit' | 'ml' | 'l' | 'g' | 'kg'
+export type ProductCostMode = 'simple' | 'recipe'
+
+export interface ProductVariationOptionEnvironmentPrice {
+  id: string
+  salesEnvironmentId: string
+  priceModifier: number
+  salesEnvironment?: {
+    id: string
+    name: string
+    color: string
+    isDefault?: boolean
+  }
+}
+
+export interface ProductVariationOptionRecipeItem {
+  id: string
+  ingredientProductId: string
+  quantity: number
+  unit: StockUnit
+  computedCost?: number
+  ingredientProduct?: {
+    id: string
+    name: string
+    emoji?: string | null
+    price: number
+    simpleCost?: number | null
+    stockUnit?: StockUnit | null
+    referenceQuantity?: number | null
+    referenceCost?: number | null
+    trackStock?: boolean
+    isStockOnly?: boolean
+  } | null
+}
+
+export interface ProductVariationGroup {
+  id: string
+  name: string
+  required: boolean
+  selectionType: 'single' | 'multiple'
+  sortOrder?: number
+  options: ProductVariationOption[]
+}
+
+export interface ProductEnvironmentPrice {
+  id: string
+  salesEnvironmentId: string
+  price: number
+  salesEnvironment?: {
+    id: string
+    name: string
+    color: string
+    isDefault?: boolean
+  }
+}
+
+export interface ProductRecipeItem {
+  id: string
+  ingredientProductId: string
+  quantity: number
+  unit: StockUnit
+  computedCost?: number
+  ingredientProduct?: {
+    id: string
+    name: string
+    emoji?: string | null
+    price: number
+    simpleCost?: number | null
+    stockUnit?: StockUnit | null
+    referenceQuantity?: number | null
+    referenceCost?: number | null
+    trackStock?: boolean
+    isStockOnly?: boolean
+  } | null
+}
+
+export type OrderCustomerFieldsPatch = {
+  customerId?: string | null
+  customer?: {
+    id: string
+    name: string
+    phone?: string | null
+    email?: string | null
+  } | null
+  eventDateId?: string | null
 }

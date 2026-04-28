@@ -1,7 +1,18 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Plus, Search, Pencil, Trash2, Package, Tag, X, ChevronRight, GripVertical } from 'lucide-react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import {
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  Package,
+  Tag,
+  X,
+  ChevronRight,
+  GripVertical,
+  MapPinned,
+} from 'lucide-react'
 import {
   type Product,
   type ProductVariationGroup,
@@ -15,9 +26,70 @@ import {
   getCategories,
   updateCategory,
 } from '@/lib/api/categories'
+import {
+  getSalesEnvironments,
+  type SalesEnvironment,
+} from '@/lib/api/sales-environments'
 
 function formatCurrency(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  return value.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  })
+}
+
+type ProductEnvironmentPriceInput = {
+  salesEnvironmentId: string
+  price: number
+}
+
+type EditableProductVariationOption = ProductVariationOption & {
+  sortOrder?: number
+}
+
+type EditableProductVariationGroup = Omit<ProductVariationGroup, 'options'> & {
+  sortOrder?: number
+  options: EditableProductVariationOption[]
+}
+
+function randomTempId() {
+  return `tmp-${Math.random().toString(36).substring(2, 10)}`
+}
+
+function isTemporaryId(id?: string | null) {
+  return !id || id.startsWith('tmp-')
+}
+
+function normalizeVariationGroupsForSubmit(groups: EditableProductVariationGroup[]) {
+  return groups
+    .filter((group) => group.name.trim())
+    .map((group, groupIndex) => ({
+      id: isTemporaryId(group.id) ? undefined : group.id,
+      name: group.name.trim(),
+      required: Boolean(group.required),
+      selectionType: group.selectionType,
+      sortOrder: group.sortOrder ?? groupIndex,
+      options: (group.options ?? [])
+        .filter((option) => option.name.trim())
+        .map((option, optionIndex) => ({
+          id: isTemporaryId(option.id) ? undefined : option.id,
+          name: option.name.trim(),
+          priceModifier: Number(option.priceModifier ?? 0),
+          sortOrder: option.sortOrder ?? optionIndex,
+          active: option.active ?? true,
+          environmentPrices: option.environmentPrices ?? [],
+
+          // Cost data is intentionally not editable on this page.
+          // It is preserved here so changing price/variations does not wipe costs
+          // configured in Estoque.
+          costMode: option.costMode,
+          simpleCost: option.simpleCost,
+          stockUnit: option.stockUnit,
+          referenceQuantity: option.referenceQuantity,
+          referenceCost: option.referenceCost,
+          recipeItems: option.recipeItems ?? [],
+        })),
+    }))
 }
 
 export default function ProdutosPage() {
@@ -25,6 +97,7 @@ export default function ProdutosPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | 'all'>('all')
   const [categories, setCategories] = useState<CategoryConfig[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [salesEnvironments, setSalesEnvironments] = useState<SalesEnvironment[]>([])
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [isProductModalOpen, setIsProductModalOpen] = useState(false)
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
@@ -35,13 +108,15 @@ export default function ProdutosPage() {
   useEffect(() => {
     async function loadData() {
       try {
-        const [productsData, categoriesData] = await Promise.all([
+        const [productsData, categoriesData, environmentsData] = await Promise.all([
           getProducts(),
           getCategories(),
+          getSalesEnvironments(),
         ])
 
         setProducts(productsData)
         setCategories(categoriesData)
+        setSalesEnvironments(environmentsData)
       } catch (error) {
         console.error('Erro ao carregar dados:', error)
       } finally {
@@ -52,79 +127,101 @@ export default function ProdutosPage() {
     loadData()
   }, [])
 
-  const filteredProducts = products.filter((product) => {
-    const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesCategory = selectedCategory === 'all' || product.categoryId === selectedCategory
-    return matchesSearch && matchesCategory
-  })
+  const filteredProducts = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase()
 
-  const handleDeleteProduct = async (productId: string) => {
+    return products.filter((product) => {
+      const matchesSearch =
+        term === '' ||
+        product.name.toLowerCase().includes(term) ||
+        (product.emoji ?? '').toLowerCase().includes(term) ||
+        (product.category?.name ?? '').toLowerCase().includes(term)
+
+      const matchesCategory =
+        selectedCategory === 'all' || product.categoryId === selectedCategory
+
+      return matchesSearch && matchesCategory && !product.isStockOnly
+    })
+  }, [products, searchTerm, selectedCategory])
+
+  async function handleDeleteProduct(productId: string) {
+    const confirmed = window.confirm('Deseja realmente excluir este produto?')
+    if (!confirmed) return
+
     try {
       await deleteProduct(productId)
-      setProducts((prev) => prev.filter((p) => p.id !== productId))
+      setProducts((prev) => prev.filter((product) => product.id !== productId))
     } catch (error) {
       console.error('Erro ao excluir produto:', error)
+      alert('Erro ao excluir produto.')
     }
   }
 
-  const handleEditProduct = (product: Product) => {
+  function handleEditProduct(product: Product) {
     setEditingProduct(product)
     setIsProductModalOpen(true)
   }
 
-  const handleAddNewProduct = () => {
+  function handleAddNewProduct() {
     setEditingProduct(null)
     setIsProductModalOpen(true)
   }
 
-  const handleSaveProduct = async (productData: Omit<Product, 'id'>) => {
+  async function handleSaveProduct(productData: Omit<Product, 'id'>) {
     try {
       if (editingProduct) {
         const updated = await updateProduct(editingProduct.id, productData)
         setProducts((prev) =>
-          prev.map((p) => (p.id === editingProduct.id ? updated : p))
+          prev.map((product) => (product.id === editingProduct.id ? updated : product))
         )
       } else {
         const created = await createProduct(productData)
-        setProducts((prev) => [...prev, created])
+        setProducts((prev) => [created, ...prev])
       }
 
       setIsProductModalOpen(false)
       setEditingProduct(null)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao salvar produto:', error)
+      alert(error?.message || 'Erro ao salvar produto.')
     }
   }
 
-  const handleDeleteCategory = async (categoryId: string) => {
+  async function handleDeleteCategory(categoryId: string) {
+    const confirmed = window.confirm('Deseja realmente excluir esta categoria?')
+    if (!confirmed) return
+
     try {
       await deleteCategory(categoryId)
-      setCategories((prev) => prev.filter((c) => c.id !== categoryId))
+      setCategories((prev) => prev.filter((category) => category.id !== categoryId))
 
       if (selectedCategory === categoryId) {
         setSelectedCategory('all')
       }
     } catch (error) {
       console.error('Erro ao excluir categoria:', error)
+      alert('Erro ao excluir categoria.')
     }
   }
 
-  const handleEditCategory = (category: CategoryConfig) => {
+  function handleEditCategory(category: CategoryConfig) {
     setEditingCategory(category)
     setIsCategoryModalOpen(true)
   }
 
-  const handleAddNewCategory = () => {
+  function handleAddNewCategory() {
     setEditingCategory(null)
     setIsCategoryModalOpen(true)
   }
 
-  const handleSaveCategory = async (categoryData: Omit<CategoryConfig, 'id'>) => {
+  async function handleSaveCategory(categoryData: Omit<CategoryConfig, 'id'>) {
     try {
       if (editingCategory) {
         const updated = await updateCategory(editingCategory.id, categoryData)
         setCategories((prev) =>
-          prev.map((c) => (c.id === editingCategory.id ? updated : c))
+          prev.map((category) =>
+            category.id === editingCategory.id ? updated : category
+          )
         )
       } else {
         const created = await createCategory(categoryData)
@@ -133,8 +230,9 @@ export default function ProdutosPage() {
 
       setIsCategoryModalOpen(false)
       setEditingCategory(null)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao salvar categoria:', error)
+      alert(error?.message || 'Erro ao salvar categoria.')
     }
   }
 
@@ -153,6 +251,7 @@ export default function ProdutosPage() {
           <Package className="h-6 w-6 text-primary" />
           <h1 className="text-xl font-semibold text-foreground">Produtos</h1>
         </div>
+
         <div className="flex items-center gap-2">
           <button
             onClick={() => setActiveTab('products')}
@@ -164,6 +263,7 @@ export default function ProdutosPage() {
           >
             Produtos
           </button>
+
           <button
             onClick={() => setActiveTab('categories')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -187,12 +287,12 @@ export default function ProdutosPage() {
                 type="text"
                 placeholder="Buscar produto..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(event) => setSearchTerm(event.target.value)}
                 className="w-full pl-10 pr-4 py-2 bg-input border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => setSelectedCategory('all')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -203,17 +303,18 @@ export default function ProdutosPage() {
               >
                 Todos
               </button>
-              {categories.map((cat) => (
+
+              {categories.map((category) => (
                 <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(cat.id)}
+                  key={category.id}
+                  onClick={() => setSelectedCategory(category.id)}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    selectedCategory === cat.id
+                    selectedCategory === category.id
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
                   }`}
                 >
-                  {cat.name}
+                  {category.name}
                 </button>
               ))}
             </div>
@@ -232,35 +333,57 @@ export default function ProdutosPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
-                    <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Produto</th>
-                    <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Categoria</th>
-                    <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Variacoes</th>
-                    <th className="text-right px-6 py-4 text-sm font-medium text-muted-foreground">Preco</th>
-                    <th className="text-right px-6 py-4 text-sm font-medium text-muted-foreground">Acoes</th>
+                    <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">
+                      Produto
+                    </th>
+                    <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">
+                      Categoria
+                    </th>
+                    <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">
+                      Variações
+                    </th>
+                    <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">
+                      Ambientes
+                    </th>
+                    <th className="text-right px-6 py-4 text-sm font-medium text-muted-foreground">
+                      Preço base
+                    </th>
+                    <th className="text-right px-6 py-4 text-sm font-medium text-muted-foreground">
+                      Ações
+                    </th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {filteredProducts.map((product) => (
-                    <tr key={product.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                    <tr
+                      key={product.id}
+                      className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors"
+                    >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <span className="text-2xl">{product.emoji}</span>
-                          <span className="font-medium text-foreground">{product.name}</span>
+                          <span className="font-medium text-foreground">
+                            {product.name}
+                          </span>
                         </div>
                       </td>
+
                       <td className="px-6 py-4">
                         <span className="px-3 py-1 bg-secondary rounded-full text-xs font-medium text-secondary-foreground">
-                          {categories.find((c) => c.id === product.categoryId)?.name || '-'}
+                          {categories.find((category) => category.id === product.categoryId)
+                            ?.name || '-'}
                         </span>
                       </td>
+
                       <td className="px-6 py-4">
                         {product.variationGroups && product.variationGroups.length > 0 ? (
                           <div className="flex items-center gap-1 text-sm text-muted-foreground">
                             <ChevronRight className="h-4 w-4" />
                             <span>{product.variationGroups.length} grupos</span>
-                            {product.variationGroups.some((g) => g.required) && (
+                            {product.variationGroups.some((group) => group.required) && (
                               <span className="ml-1 px-1.5 py-0.5 bg-warning/20 text-warning text-xs rounded">
-                                obrigatorio
+                                obrigatório
                               </span>
                             )}
                           </div>
@@ -268,20 +391,54 @@ export default function ProdutosPage() {
                           <span className="text-sm text-muted-foreground">-</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-right">
-                        <span className="font-mono text-foreground">{formatCurrency(product.price)}</span>
+
+                      <td className="px-6 py-4">
+                        {product.environmentPrices && product.environmentPrices.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {product.environmentPrices.map((item) => (
+                              <span
+                                key={item.salesEnvironmentId}
+                                className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-secondary text-xs text-secondary-foreground"
+                              >
+                                <span
+                                  className="h-2.5 w-2.5 rounded-full"
+                                  style={{
+                                    backgroundColor:
+                                      item.salesEnvironment?.color ?? '#64748B',
+                                  }}
+                                />
+                                {item.salesEnvironment?.name || 'Ambiente'}:{' '}
+                                {formatCurrency(Number(item.price))}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            Preço base apenas
+                          </span>
+                        )}
                       </td>
+
+                      <td className="px-6 py-4 text-right">
+                        <span className="font-mono text-foreground">
+                          {formatCurrency(product.price)}
+                        </span>
+                      </td>
+
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => handleEditProduct(product)}
                             className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
+                            title="Editar produto"
                           >
                             <Pencil className="h-4 w-4" />
                           </button>
+
                           <button
                             onClick={() => handleDeleteProduct(product.id)}
                             className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                            title="Excluir produto"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -308,6 +465,7 @@ export default function ProdutosPage() {
             <p className="text-sm text-muted-foreground">
               {categories.length} categoria{categories.length !== 1 ? 's' : ''}
             </p>
+
             <button
               onClick={handleAddNewCategory}
               className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
@@ -320,7 +478,9 @@ export default function ProdutosPage() {
           <div className="flex-1 overflow-y-auto p-6">
             <div className="grid grid-cols-3 gap-4">
               {categories.map((category) => {
-                const productCount = products.filter((p) => p.categoryId === category.id).length
+                const productCount = products.filter(
+                  (product) => product.categoryId === category.id && !product.isStockOnly
+                ).length
 
                 return (
                   <div
@@ -337,8 +497,10 @@ export default function ProdutosPage() {
                           </p>
                         </div>
                       </div>
+
                       <GripVertical className="h-5 w-5 text-muted-foreground/50" />
                     </div>
+
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => handleEditCategory(category)}
@@ -346,6 +508,7 @@ export default function ProdutosPage() {
                       >
                         Editar
                       </button>
+
                       <button
                         onClick={() => handleDeleteCategory(category.id)}
                         className="px-3 py-2 text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
@@ -365,6 +528,7 @@ export default function ProdutosPage() {
         <ProductModal
           product={editingProduct}
           categories={categories}
+          salesEnvironments={salesEnvironments}
           onSave={handleSaveProduct}
           onClose={() => {
             setIsProductModalOpen(false)
@@ -390,11 +554,13 @@ export default function ProdutosPage() {
 function ProductModal({
   product,
   categories,
+  salesEnvironments,
   onSave,
   onClose,
 }: {
   product: Product | null
   categories: CategoryConfig[]
+  salesEnvironments: SalesEnvironment[]
   onSave: (data: Omit<Product, 'id'>) => void
   onClose: () => void
 }) {
@@ -402,22 +568,45 @@ function ProductModal({
   const [price, setPrice] = useState(product?.price.toString() || '')
   const [categoryId, setCategoryId] = useState(product?.categoryId || '')
   const [emoji, setEmoji] = useState(product?.emoji || '📦')
-  const [variationGroups, setVariationGroups] = useState<ProductVariationGroup[]>(
-    product?.variationGroups || []
+  const [variationGroups, setVariationGroups] = useState<EditableProductVariationGroup[]>(
+    () =>
+      ((product?.variationGroups ?? []) as EditableProductVariationGroup[]).map(
+        (group, groupIndex) => ({
+          ...group,
+          sortOrder: group.sortOrder ?? groupIndex,
+          options: (group.options ?? []).map((option, optionIndex) => ({
+            ...option,
+            sortOrder: option.sortOrder ?? optionIndex,
+            priceModifier: Number(option.priceModifier ?? 0),
+          })),
+        })
+      )
   )
+
+  const [environmentPrices, setEnvironmentPrices] = useState<Record<string, string>>(() => {
+    return Object.fromEntries(
+      (product?.environmentPrices ?? []).map((item) => [
+        item.salesEnvironmentId,
+        String(item.price),
+      ])
+    )
+  })
 
   const [newGroupName, setNewGroupName] = useState('')
   const [newGroupRequired, setNewGroupRequired] = useState(false)
-  const [newGroupSelectionType, setNewGroupSelectionType] = useState<'single' | 'multiple'>('single')
+  const [newGroupSelectionType, setNewGroupSelectionType] = useState<'single' | 'multiple'>(
+    'single'
+  )
 
-  const handleAddGroup = () => {
+  function handleAddGroup() {
     if (!newGroupName.trim()) return
 
-    const newGroup: ProductVariationGroup = {
-      id: Math.random().toString(36).substring(2, 9),
+    const newGroup: EditableProductVariationGroup = {
+      id: randomTempId(),
       name: newGroupName.trim(),
       required: newGroupRequired,
       selectionType: newGroupSelectionType,
+      sortOrder: variationGroups.length,
       options: [],
     }
 
@@ -427,67 +616,152 @@ function ProductModal({
     setNewGroupSelectionType('single')
   }
 
-  const handleRemoveGroup = (groupId: string) => {
-    setVariationGroups((prev) => prev.filter((g) => g.id !== groupId))
-  }
+  function handleRemoveGroup(groupId: string) {
+    const group = variationGroups.find((item) => item.id === groupId)
 
-  const handleUpdateGroup = (
-    groupId: string,
-    updates: Partial<ProductVariationGroup>
-  ) => {
-    setVariationGroups((prev) =>
-      prev.map((g) => (g.id === groupId ? { ...g, ...updates } : g))
-    )
-  }
+    if (group?.options?.length) {
+      const confirmed = window.confirm(
+        `Deseja remover o grupo "${group.name}" e todas as ${group.options.length} variações dele?`
+      )
 
-  const handleAddOption = (groupId: string, optionName: string, optionPrice: string) => {
-    if (!optionName.trim()) return
-
-    const newOption: ProductVariationOption = {
-      id: Math.random().toString(36).substring(2, 9),
-      name: optionName.trim(),
-      priceModifier: parseFloat(optionPrice) || 0,
+      if (!confirmed) return
     }
 
+    setVariationGroups((prev) => prev.filter((group) => group.id !== groupId))
+  }
+
+  function handleUpdateGroup(
+    groupId: string,
+    updates: Partial<EditableProductVariationGroup>
+  ) {
     setVariationGroups((prev) =>
-      prev.map((g) =>
-        g.id === groupId
-          ? { ...g, options: [...g.options, newOption] }
-          : g
+      prev.map((group) => (group.id === groupId ? { ...group, ...updates } : group))
+    )
+  }
+
+  function handleAddOption(groupId: string, optionName: string, optionPrice: string) {
+    if (!optionName.trim()) return
+
+    setVariationGroups((prev) =>
+      prev.map((group) => {
+        if (group.id !== groupId) return group
+
+        const newOption: EditableProductVariationOption = {
+          id: randomTempId(),
+          groupId,
+          name: optionName.trim(),
+          priceModifier: parseFloat(optionPrice) || 0,
+          sortOrder: group.options.length,
+          active: true,
+
+          // Created without cost configuration.
+          // Cost is configured only in Estoque.
+          costMode: 'simple',
+          simpleCost: null,
+          stockUnit: null,
+          referenceQuantity: null,
+          referenceCost: null,
+          recipeItems: [],
+          environmentPrices: [],
+        }
+
+        return {
+          ...group,
+          options: [...(group.options ?? []), newOption],
+        }
+      })
+    )
+  }
+
+  function handleRemoveOption(groupId: string, optionId: string) {
+    setVariationGroups((prev) =>
+      prev.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              options: (group.options ?? []).filter((option) => option.id !== optionId),
+            }
+          : group
       )
     )
   }
 
-  const handleRemoveOption = (groupId: string, optionId: string) => {
+  function handleUpdateOption(
+    groupId: string,
+    optionId: string,
+    updates: Partial<EditableProductVariationOption>
+  ) {
     setVariationGroups((prev) =>
-      prev.map((g) =>
-        g.id === groupId
-          ? { ...g, options: g.options.filter((o) => o.id !== optionId) }
-          : g
+      prev.map((group) =>
+        group.id !== groupId
+          ? group
+          : {
+              ...group,
+              options: (group.options ?? []).map((option) =>
+                option.id === optionId ? { ...option, ...updates } : option
+              ),
+            }
       )
     )
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+
+    if (!categoryId) {
+      alert('Selecione uma categoria.')
+      return
+    }
+
+    const parsedEnvironmentPrices: ProductEnvironmentPriceInput[] = Object.entries(
+      environmentPrices
+    )
+      .map(([salesEnvironmentId, value]) => ({
+        salesEnvironmentId,
+        price: parseFloat(value),
+      }))
+      .filter((item) => !Number.isNaN(item.price))
 
     onSave({
       name,
       price: parseFloat(price) || 0,
       categoryId,
       emoji,
-      variationGroups: variationGroups.length > 0 ? variationGroups : undefined,
-    })
+      variationGroups: normalizeVariationGroupsForSubmit(
+        variationGroups
+      ) as ProductVariationGroup[],
+      environmentPrices: parsedEnvironmentPrices,
+
+      // Product cost/stock data is not editable here.
+      // These fields are preserved from the current product so editing price/variation
+      // from Produtos does not erase cost configuration from Estoque.
+      isStockOnly: product?.isStockOnly ?? false,
+      trackStock: product?.trackStock ?? false,
+      stockQuantity: product?.stockQuantity ?? 0,
+      minStock: product?.minStock ?? 0,
+      costMode: product?.costMode ?? 'simple',
+      simpleCost: product?.simpleCost ?? null,
+      stockUnit: product?.stockUnit ?? null,
+      referenceQuantity: product?.referenceQuantity ?? null,
+      referenceCost: product?.referenceCost ?? null,
+      madeOnDemand: product?.madeOnDemand ?? false,
+      unlimitedStock: product?.unlimitedStock ?? false,
+      recipeOutputQuantity: product?.recipeOutputQuantity ?? null,
+      recipeOutputUnit: product?.recipeOutputUnit ?? null,
+      recipeItems: product?.recipeItems ?? [],
+    } as Omit<Product, 'id'>)
   }
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-card rounded-xl border border-border w-full max-w-3xl mx-4 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-card rounded-xl border border-border w-full max-w-5xl mx-4 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <h2 className="text-lg font-semibold text-foreground">
             {product ? 'Editar Produto' : 'Novo Produto'}
           </h2>
+
           <button
+            type="button"
             onClick={onClose}
             className="text-muted-foreground hover:text-foreground transition-colors"
           >
@@ -502,17 +776,18 @@ function ProductModal({
               <input
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(event) => setName(event.target.value)}
                 className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground"
                 required
               />
             </div>
+
             <div className="w-24">
               <label className="block text-sm font-medium text-foreground mb-2">Emoji</label>
               <input
                 type="text"
                 value={emoji}
-                onChange={(e) => setEmoji(e.target.value)}
+                onChange={(event) => setEmoji(event.target.value)}
                 className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground text-center text-2xl"
                 maxLength={2}
               />
@@ -521,95 +796,152 @@ function ProductModal({
 
           <div className="flex gap-4">
             <div className="flex-1">
-              <label className="block text-sm font-medium text-foreground mb-2">Preco Base</label>
+              <label className="block text-sm font-medium text-foreground mb-2">
+                Preço base
+              </label>
               <input
                 type="number"
                 step="0.01"
                 min="0"
                 value={price}
-                onChange={(e) => setPrice(e.target.value)}
+                onChange={(event) => setPrice(event.target.value)}
                 className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground"
                 required
               />
             </div>
+
             <div className="flex-1">
               <label className="block text-sm font-medium text-foreground mb-2">Categoria</label>
               <select
                 value={categoryId}
-                onChange={(e) => setCategoryId(e.target.value)}
+                onChange={(event) => setCategoryId(event.target.value)}
                 className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground"
                 required
               >
                 <option value="" disabled>
                   Selecione uma categoria
                 </option>
-                {categories.map((cat) => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.emoji} {cat.name}
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.emoji} {category.name}
                   </option>
                 ))}
               </select>
             </div>
           </div>
 
-          <div className="border-t border-border pt-4 space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-3">
-                Grupos de Variacao
+          <div className="border border-border rounded-xl p-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <MapPinned className="h-4 w-4 text-primary" />
+              <h3 className="text-sm font-semibold text-foreground">
+                Preços por ambiente de venda
+              </h3>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              {salesEnvironments.map((environment) => (
+                <div
+                  key={environment.id}
+                  className="rounded-lg border border-border bg-background p-3"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: environment.color ?? '#64748B' }}
+                    />
+                    <span className="text-sm font-medium text-foreground">
+                      {environment.name}
+                    </span>
+                  </div>
+
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={environmentPrices[environment.id] ?? ''}
+                    placeholder="Usar preço base"
+                    onChange={(event) => {
+                      const raw = event.target.value
+                      setEnvironmentPrices((prev) => {
+                        const next = { ...prev }
+
+                        if (raw.trim() === '') {
+                          delete next[environment.id]
+                        } else {
+                          next[environment.id] = raw
+                        }
+
+                        return next
+                      })
+                    }}
+                    className="w-full px-3 py-2 bg-secondary/20 border border-border rounded-lg text-foreground"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="border border-border rounded-xl p-4 space-y-4">
+            <h3 className="text-sm font-semibold text-foreground">Variações do produto</h3>
+
+            <div className="grid md:grid-cols-[1fr_160px_150px_auto] gap-2">
+              <input
+                type="text"
+                value={newGroupName}
+                onChange={(event) => setNewGroupName(event.target.value)}
+                placeholder="Nome do grupo. Ex: Fruta"
+                className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
+              />
+
+              <select
+                value={newGroupSelectionType}
+                onChange={(event) =>
+                  setNewGroupSelectionType(event.target.value as 'single' | 'multiple')
+                }
+                className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
+              >
+                <option value="single">Seleção única</option>
+                <option value="multiple">Múltipla</option>
+              </select>
+
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={newGroupRequired}
+                  onChange={(event) => setNewGroupRequired(event.target.checked)}
+                />
+                Obrigatório
               </label>
 
-              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 mb-4">
-                <input
-                  type="text"
-                  value={newGroupName}
-                  onChange={(e) => setNewGroupName(e.target.value)}
-                  placeholder="Ex: Fruta"
-                  className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
-                />
-                <select
-                  value={newGroupSelectionType}
-                  onChange={(e) =>
-                    setNewGroupSelectionType(e.target.value as 'single' | 'multiple')
-                  }
-                  className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
-                >
-                  <option value="single">Unica</option>
-                  <option value="multiple">Multipla</option>
-                </select>
-                <label className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={newGroupRequired}
-                    onChange={(e) => setNewGroupRequired(e.target.checked)}
-                  />
-                  Obrigatorio
-                </label>
-                <button
-                  type="button"
-                  onClick={handleAddGroup}
-                  className="px-3 py-2 bg-secondary text-secondary-foreground rounded-lg"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleAddGroup}
+                className="px-3 py-2 bg-secondary text-secondary-foreground rounded-lg inline-flex items-center justify-center"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
 
-              <div className="space-y-4">
-                {variationGroups.map((group) => (
-                  <VariationGroupEditor
-                    key={group.id}
-                    group={group}
-                    onRemove={() => handleRemoveGroup(group.id)}
-                    onUpdate={(updates) => handleUpdateGroup(group.id, updates)}
-                    onAddOption={(name, price) => handleAddOption(group.id, name, price)}
-                    onRemoveOption={(optionId) => handleRemoveOption(group.id, optionId)}
-                  />
-                ))}
-              </div>
+            <div className="space-y-4">
+              {variationGroups.map((group) => (
+                <VariationGroupEditor
+                  key={group.id}
+                  group={group}
+                  onRemove={() => handleRemoveGroup(group.id)}
+                  onUpdate={(updates) => handleUpdateGroup(group.id, updates)}
+                  onAddOption={(optionName, optionPrice) =>
+                    handleAddOption(group.id, optionName, optionPrice)
+                  }
+                  onRemoveOption={(optionId) => handleRemoveOption(group.id, optionId)}
+                  onUpdateOption={(optionId, updates) =>
+                    handleUpdateOption(group.id, optionId, updates)
+                  }
+                />
+              ))}
             </div>
 
             <p className="text-xs text-muted-foreground">
-              Exemplo: Fruta (obrigatorio, unica), Destilado (obrigatorio, unica),
-              Ajustes (opcional, multipla).
+              Esta página configura apenas preços de venda. Custos simples, receitas e
+              controle de estoque ficam na página Estoque.
             </p>
           </div>
 
@@ -621,6 +953,7 @@ function ProductModal({
             >
               Cancelar
             </button>
+
             <button
               type="submit"
               className="flex-1 px-4 py-3 bg-primary text-primary-foreground rounded-lg font-medium"
@@ -640,102 +973,132 @@ function VariationGroupEditor({
   onUpdate,
   onAddOption,
   onRemoveOption,
+  onUpdateOption,
 }: {
-  group: ProductVariationGroup
+  group: EditableProductVariationGroup
   onRemove: () => void
-  onUpdate: (updates: Partial<ProductVariationGroup>) => void
+  onUpdate: (updates: Partial<EditableProductVariationGroup>) => void
   onAddOption: (name: string, price: string) => void
   onRemoveOption: (optionId: string) => void
+  onUpdateOption: (optionId: string, updates: Partial<EditableProductVariationOption>) => void
 }) {
-  const [newOptionName, setNewOptionName] = useState('')
-  const [newOptionPrice, setNewOptionPrice] = useState('0')
+  const [optionName, setOptionName] = useState('')
+  const [optionPrice, setOptionPrice] = useState('')
+
+  function handleAddOption() {
+    if (!optionName.trim()) return
+
+    onAddOption(optionName, optionPrice)
+    setOptionName('')
+    setOptionPrice('')
+  }
 
   return (
-    <div className="border border-border rounded-xl p-4 space-y-4">
-      <div className="flex items-center gap-3">
-        <input
-          type="text"
-          value={group.name}
-          onChange={(e) => onUpdate({ name: e.target.value })}
-          className="flex-1 px-3 py-2 bg-input border border-border rounded-lg text-foreground"
-        />
-        <select
-          value={group.selectionType}
-          onChange={(e) =>
-            onUpdate({ selectionType: e.target.value as 'single' | 'multiple' })
-          }
-          className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
-        >
-          <option value="single">Unica</option>
-          <option value="multiple">Multipla</option>
-        </select>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+    <div className="border border-border rounded-lg p-4 bg-secondary/20 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="grid md:grid-cols-[1fr_160px_140px] gap-2 flex-1">
           <input
-            type="checkbox"
-            checked={group.required}
-            onChange={(e) => onUpdate({ required: e.target.checked })}
+            type="text"
+            value={group.name}
+            onChange={(event) => onUpdate({ name: event.target.value })}
+            placeholder="Nome do grupo"
+            className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
           />
-          Obrigatorio
-        </label>
+
+          <select
+            value={group.selectionType}
+            onChange={(event) =>
+              onUpdate({ selectionType: event.target.value as 'single' | 'multiple' })
+            }
+            className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
+          >
+            <option value="single">Seleção única</option>
+            <option value="multiple">Múltipla</option>
+          </select>
+
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={group.required}
+              onChange={(event) => onUpdate({ required: event.target.checked })}
+            />
+            Obrigatório
+          </label>
+        </div>
+
         <button
           type="button"
           onClick={onRemove}
           className="p-2 text-destructive hover:bg-destructive/10 rounded-lg"
+          title="Remover grupo"
         >
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
 
-      {group.options.length > 0 && (
-        <div className="space-y-2">
-          {group.options.map((option) => (
-            <div
-              key={option.id}
-              className="flex items-center justify-between p-3 bg-secondary rounded-lg"
-            >
-              <span className="font-medium text-foreground">{option.name}</span>
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-muted-foreground">
-                  {option.priceModifier >= 0 ? '+' : ''}
-                  {formatCurrency(option.priceModifier)}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onRemoveOption(option.id)}
-                  className="text-destructive hover:text-destructive/80"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="space-y-2">
+        {(group.options ?? []).map((option) => (
+          <div
+            key={option.id}
+            className="grid md:grid-cols-[1fr_160px_auto] gap-2 items-center"
+          >
+            <input
+              type="text"
+              value={option.name}
+              onChange={(event) =>
+                onUpdateOption(option.id, { name: event.target.value })
+              }
+              placeholder="Nome da opção. Ex: Limão"
+              className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
+            />
 
-      <div className="flex gap-2">
+            <input
+              type="number"
+              step="0.01"
+              value={String(option.priceModifier ?? 0)}
+              onChange={(event) =>
+                onUpdateOption(option.id, {
+                  priceModifier: parseFloat(event.target.value) || 0,
+                })
+              }
+              placeholder="Preço extra"
+              className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
+            />
+
+            <button
+              type="button"
+              onClick={() => onRemoveOption(option.id)}
+              className="p-2 text-destructive hover:bg-destructive/10 rounded-lg"
+              title="Remover opção"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid md:grid-cols-[1fr_160px_auto] gap-2 pt-2 border-t border-border">
         <input
           type="text"
-          value={newOptionName}
-          onChange={(e) => setNewOptionName(e.target.value)}
-          className="flex-1 px-3 py-2 bg-input border border-border rounded-lg text-foreground"
-          placeholder="Nome da opcao"
+          value={optionName}
+          onChange={(event) => setOptionName(event.target.value)}
+          placeholder="Nova opção. Ex: Morango"
+          className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
         />
+
         <input
           type="number"
           step="0.01"
-          value={newOptionPrice}
-          onChange={(e) => setNewOptionPrice(e.target.value)}
-          className="w-28 px-3 py-2 bg-input border border-border rounded-lg text-foreground"
-          placeholder="+/-"
+          value={optionPrice}
+          onChange={(event) => setOptionPrice(event.target.value)}
+          placeholder="Preço extra"
+          className="px-3 py-2 bg-input border border-border rounded-lg text-foreground"
         />
+
         <button
           type="button"
-          onClick={() => {
-            onAddOption(newOptionName, newOptionPrice)
-            setNewOptionName('')
-            setNewOptionPrice('0')
-          }}
-          className="px-3 py-2 bg-secondary text-secondary-foreground rounded-lg"
+          onClick={handleAddOption}
+          className="px-3 py-2 bg-secondary text-secondary-foreground rounded-lg inline-flex items-center justify-center"
         >
           <Plus className="h-4 w-4" />
         </button>
@@ -756,9 +1119,13 @@ function CategoryModal({
   const [name, setName] = useState(category?.name || '')
   const [emoji, setEmoji] = useState(category?.emoji || '📦')
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    onSave({ name, emoji })
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+
+    onSave({
+      name,
+      emoji,
+    })
   }
 
   return (
@@ -768,7 +1135,9 @@ function CategoryModal({
           <h2 className="text-lg font-semibold text-foreground">
             {category ? 'Editar Categoria' : 'Nova Categoria'}
           </h2>
+
           <button
+            type="button"
             onClick={onClose}
             className="text-muted-foreground hover:text-foreground transition-colors"
           >
@@ -777,41 +1146,40 @@ function CategoryModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-foreground mb-2">Nome</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Ex: Sobremesas"
-                required
-              />
-            </div>
-            <div className="w-24">
-              <label className="block text-sm font-medium text-foreground mb-2">Emoji</label>
-              <input
-                type="text"
-                value={emoji}
-                onChange={(e) => setEmoji(e.target.value)}
-                className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground text-center text-2xl focus:outline-none focus:ring-2 focus:ring-ring"
-                maxLength={2}
-              />
-            </div>
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">Nome</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">Emoji</label>
+            <input
+              type="text"
+              value={emoji}
+              onChange={(event) => setEmoji(event.target.value)}
+              className="w-full px-4 py-3 bg-input border border-border rounded-lg text-foreground text-center text-3xl"
+              maxLength={2}
+            />
           </div>
 
           <div className="flex gap-3 pt-4">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-3 bg-secondary text-secondary-foreground rounded-lg font-medium hover:bg-secondary/80 transition-colors"
+              className="flex-1 px-4 py-3 bg-secondary text-secondary-foreground rounded-lg font-medium"
             >
               Cancelar
             </button>
+
             <button
               type="submit"
-              className="flex-1 px-4 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
+              className="flex-1 px-4 py-3 bg-primary text-primary-foreground rounded-lg font-medium"
             >
               {category ? 'Salvar' : 'Adicionar'}
             </button>

@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma'
+import { createAuditLog } from './audit.service'
 
 type CreateCategoryInput = {
   companyId: string
@@ -34,7 +35,10 @@ function normalizeCategory(category: any) {
 
 export async function getCategoriesByCompany(companyId: string) {
   const categories = await prisma.category.findMany({
-    where: { companyId },
+    where: {
+      companyId,
+      deletedAt: null,
+    },
     orderBy: { name: 'asc' },
   })
 
@@ -46,6 +50,7 @@ export async function getCategoryById(categoryId: string, companyId: string) {
     where: {
       id: categoryId,
       companyId,
+      deletedAt: null,
     },
   })
 
@@ -56,18 +61,37 @@ export async function getCategoryById(categoryId: string, companyId: string) {
   return normalizeCategory(category)
 }
 
-export async function createCategory(data: CreateCategoryInput) {
+export async function createCategory(data: CreateCategoryInput, userId: string) {
   if (!data.name?.trim()) {
     throw new Error('CATEGORY_NAME_REQUIRED')
   }
 
-  const category = await prisma.category.create({
-    data: {
+  const category = await prisma.$transaction(async (tx) => {
+    const created = await tx.category.create({
+      data: {
+        companyId: data.companyId,
+        name: data.name.trim(),
+        slug: slugify(data.name),
+        createdByUserId: userId,
+        updatedByUserId: userId,
+        ...(data.emoji !== undefined ? { emoji: data.emoji } : {}),
+      },
+    })
+
+    await createAuditLog(tx, {
       companyId: data.companyId,
-      name: data.name.trim(),
-      slug: slugify(data.name),
-      ...(data.emoji !== undefined ? { emoji: data.emoji } : {}),
-    },
+      userId,
+      entityType: 'Category',
+      entityId: created.id,
+      action: 'CATEGORY_CREATED',
+      newValues: {
+        name: created.name,
+        slug: created.slug,
+        emoji: created.emoji,
+      },
+    })
+
+    return created
   })
 
   return normalizeCategory(category)
@@ -76,12 +100,14 @@ export async function createCategory(data: CreateCategoryInput) {
 export async function updateCategory(
   categoryId: string,
   companyId: string,
-  data: UpdateCategoryInput
+  data: UpdateCategoryInput,
+  userId: string
 ) {
   const existingCategory = await prisma.category.findFirst({
     where: {
       id: categoryId,
       companyId,
+      deletedAt: null,
     },
   })
 
@@ -93,23 +119,51 @@ export async function updateCategory(
     throw new Error('CATEGORY_NAME_REQUIRED')
   }
 
-  const category = await prisma.category.update({
-    where: { id: categoryId },
-    data: {
-      name: data.name === undefined ? existingCategory.name : data.name.trim(),
-      slug: data.name === undefined ? existingCategory.slug : slugify(data.name),
-      ...(data.emoji !== undefined ? { emoji: data.emoji } : {}),
-    },
+  const category = await prisma.$transaction(async (tx) => {
+    const updated = await tx.category.update({
+      where: { id: categoryId },
+      data: {
+        name: data.name === undefined ? existingCategory.name : data.name.trim(),
+        slug: data.name === undefined ? existingCategory.slug : slugify(data.name),
+        updatedByUserId: userId,
+        ...(data.emoji !== undefined ? { emoji: data.emoji } : {}),
+      },
+    })
+
+    await createAuditLog(tx, {
+      companyId,
+      userId,
+      entityType: 'Category',
+      entityId: updated.id,
+      action: 'CATEGORY_UPDATED',
+      oldValues: {
+        name: existingCategory.name,
+        slug: existingCategory.slug,
+        emoji: existingCategory.emoji,
+      },
+      newValues: {
+        name: updated.name,
+        slug: updated.slug,
+        emoji: updated.emoji,
+      },
+    })
+
+    return updated
   })
 
   return normalizeCategory(category)
 }
 
-export async function deleteCategory(categoryId: string, companyId: string) {
+export async function deleteCategory(
+  categoryId: string,
+  companyId: string,
+  userId: string
+) {
   const existingCategory = await prisma.category.findFirst({
     where: {
       id: categoryId,
       companyId,
+      deletedAt: null,
     },
   })
 
@@ -122,6 +176,7 @@ export async function deleteCategory(categoryId: string, companyId: string) {
       categoryId,
       companyId,
       active: true,
+      deletedAt: null,
     },
   })
 
@@ -129,8 +184,28 @@ export async function deleteCategory(categoryId: string, companyId: string) {
     throw new Error('CATEGORY_HAS_PRODUCTS')
   }
 
-  await prisma.category.delete({
-    where: { id: categoryId },
+  await prisma.$transaction(async (tx) => {
+    await tx.category.update({
+      where: { id: categoryId },
+      data: {
+        deletedAt: new Date(),
+        deletedByUserId: userId,
+        updatedByUserId: userId,
+      },
+    })
+
+    await createAuditLog(tx, {
+      companyId,
+      userId,
+      entityType: 'Category',
+      entityId: categoryId,
+      action: 'CATEGORY_DELETED',
+      oldValues: {
+        name: existingCategory.name,
+        slug: existingCategory.slug,
+        emoji: existingCategory.emoji,
+      },
+    })
   })
 
   return { ok: true }

@@ -1,35 +1,30 @@
 import { apiFetch } from './client'
 import type { Product } from '../pos-types'
 
-export function getProducts(includeInactive = false) {
-  const query = includeInactive ? '?includeInactive=true' : ''
-  return apiFetch<Product[]>(`/products${query}`, {
-    method: 'GET',
-  })
+export function getProducts() {
+  return apiFetch<Product[]>('/products')
 }
 
-export function getProductById(id: string) {
-  return apiFetch<Product>(`/products/${id}`, {
-    method: 'GET',
-  })
+export function getProductById(productId: string) {
+  return apiFetch<Product>(`/products/${productId}`)
 }
 
-export function createProduct(data: Omit<Product, 'id'>) {
+export function createProduct(input: Omit<Product, 'id'>) {
   return apiFetch<Product>('/products', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify(input),
   })
 }
 
-export function updateProduct(id: string, data: Partial<Omit<Product, 'id'>>) {
-  return apiFetch<Product>(`/products/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(data),
+export function updateProduct(productId: string, input: Omit<Product, 'id'>) {
+  return apiFetch<Product>(`/products/${productId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
   })
 }
 
-export function deleteProduct(id: string) {
-  return apiFetch<{ ok: true }>(`/products/${id}`, {
+export function deleteProduct(productId: string) {
+  return apiFetch<{ ok: true }>(`/products/${productId}`, {
     method: 'DELETE',
   })
 }

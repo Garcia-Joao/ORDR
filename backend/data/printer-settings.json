@@ -1,0 +1,24 @@
+{
+  "printers": [
+    {
+      "id": "c9oz1rmr",
+      "name": "Tickets",
+      "systemName": "Generic / Text Only",
+      "driverName": "Generic / Text Only",
+      "portName": "USB001",
+      "paperWidth": 80,
+      "type": "orders"
+    }
+  ],
+  "orderPrinterId": "c9oz1rmr",
+  "orderTicketTemplate": {
+    "showLogo": true,
+    "showOrderId": true,
+    "showDate": true,
+    "showComandaName": true,
+    "showVariations": true,
+    "showNotes": true,
+    "headerText": "Na Rotina",
+    "footerText": ""
+  }
+}

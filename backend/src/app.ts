@@ -1,12 +1,23 @@
 import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
-import bcrypt from 'bcryptjs'
+
 import authRouter from './routes/auth.routes'
 import productsRouter from './routes/products.routes'
 import categoriesRouter from './routes/categories.routes'
 import ordersRouter from './routes/orders.routes'
 import companiesRouter from './routes/companies.routes'
+import { internalCustomersRoutes } from './routes/internal-customers.routes'
+import salesEnvironmentsRouter from './routes/sales-environments.routes'
+import stockRouter from './routes/stock.routes'
+import printersRouter from './routes/printers.routes'
+import { peopleRoutes } from './routes/people.routes'
+import eventsRoutes from './routes/events.routes'
+import customersRoutes from './routes/customers.routes'
+import staffEvaluationsRoutes from './routes/staff-evaluations.routes'
+import buysRoutes from './routes/buys.routes'
+import reportsRoutes from './routes/reports.routes'
+
 import { prisma } from './lib/prisma'
 
 const app = express()
@@ -19,74 +30,41 @@ app.use(
 )
 
 app.use(cookieParser())
-app.use(express.json())
+app.use(express.json({ limit: '10mb' }))
+app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
 app.use('/auth', authRouter)
 app.use('/products', productsRouter)
 app.use('/categories', categoriesRouter)
 app.use('/orders', ordersRouter)
 app.use('/companies', companiesRouter)
-app.get('/seed-user', async (_req, res) => {
-  try {
-    let company = await prisma.company.findFirst({
-      where: { name: 'Minha Empresa' },
-    })
+app.use('/internal-customers', internalCustomersRoutes)
+app.use('/sales-environments', salesEnvironmentsRouter)
+app.use('/stock', stockRouter)
+app.use('/printers', printersRouter)
+app.use('/people', peopleRoutes)
+app.use('/events', eventsRoutes)
+app.use('/customers', customersRoutes)
+app.use('/staff-evaluations', staffEvaluationsRoutes)
+app.use('/buys', buysRoutes)
+app.use('/reports', reportsRoutes)
 
-    if (!company) {
-      company = await prisma.company.create({
-        data: { name: 'Minha Empresa' },
-      })
-    }
-
-    const existingUser = await prisma.user.findFirst({
-      where: { username: 'admin' },
-    })
-
-    if (existingUser) {
-      return res.json({
-        ok: true,
-        message: 'Usuário já existe',
-        user: {
-          id: existingUser.id,
-          username: existingUser.username,
-        },
-        company,
-      })
-    }
-
-    const hashedPassword = await bcrypt.hash('123456', 10)
-
-    const user = await prisma.user.create({
-      data: {
-        username: 'admin',
-        password: hashedPassword,
-        role: 'admin',
-        companyId: company.id,
-      },
-    })
-
-    return res.json({
-      ok: true,
-      message: 'Usuário criado com sucesso',
-      user: {
-        id: user.id,
-        username: user.username,
-      },
-      company,
-    })
-  } catch (error) {
-    console.error(error)
-    return res.status(500).json({ error: 'Erro ao criar seed user' })
-  }
-})
 
 app.get('/health', async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`
-    return res.json({ ok: true, db: 'connected' })
+
+    return res.json({
+      ok: true,
+      db: 'connected',
+    })
   } catch (error) {
     console.error(error)
-    return res.status(500).json({ ok: false, db: 'disconnected' })
+
+    return res.status(500).json({
+      ok: false,
+      db: 'disconnected',
+    })
   }
 })
 

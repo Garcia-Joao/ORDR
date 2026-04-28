@@ -7,18 +7,26 @@ import { ProductGrid } from '@/components/pos/product-grid'
 import { OrderPanel } from '@/components/pos/order-panel'
 import { OrdersList } from '@/components/pos/orders-list'
 import { TicketPreview } from '@/components/pos/ticket-preview'
-import { ListOrdered, Clock, Wifi, WifiOff, Loader2, Search } from 'lucide-react'
+import { listenStockUpdated } from '@/lib/events/stock-events'
+import { ListOrdered, Loader2, Search } from 'lucide-react'
+import { lookupCustomerByEventComanda } from '@/lib/api/customers'
+import {
+  getActiveEventDate,
+  getActiveEventDateId,
+  listenActiveEventChanged,
+} from '@/lib/events/active-events'
 import type {
   Order,
   OrderItem,
   Product,
   OrderItemVariationSelection,
   CategoryConfig,
+  PaymentMethod,
 } from '@/lib/pos-types'
 import { getItemPrice } from '@/lib/pos-types'
 
 import { createOrder, getCategories, getProducts } from '@/lib/api'
-import { logout } from '@/lib/api'
+import { getStockProducts } from '@/lib/api/stock'
 import { getOrders } from '@/lib/api/orders'
 
 function generateOrderId(): string {
@@ -47,11 +55,147 @@ function isToday(date: Date) {
   )
 }
 
+function getCategoriesWithSellableProducts(
+  categories: CategoryConfig[],
+  products: Product[]
+) {
+  const sellableProducts = products.filter((product) => !product.isStockOnly)
+
+  return categories.filter((category) =>
+    sellableProducts.some((product) => product.categoryId === category.id)
+  )
+}
+
+
+function mergeProductsWithStockInfo(
+  posProducts: any[],
+  stockProducts: any[]
+): Product[] {
+  const stockById = new Map(stockProducts.map((product) => [product.id, product]))
+
+  return posProducts.map((product) => {
+    const stockProduct = stockById.get(product.id)
+
+    return {
+      ...product,
+      ...stockProduct,
+
+      // Keep the POS/product endpoint as the source of truth for category and variations.
+      // The stock endpoint is only used to enrich the product with stock/cost fields.
+      categoryId:
+        product.categoryId ??
+        stockProduct?.categoryId ??
+        stockProduct?.category?.id ??
+        '',
+
+      variationGroups:
+        product.variationGroups?.length > 0
+          ? product.variationGroups.map((group: any) => {
+            const stockGroup = stockProduct?.variationGroups?.find(
+              (item: any) => item.id === group.id
+            )
+
+            return {
+              ...group,
+              options: (group.options ?? []).map((option: any) => {
+                const stockOption = stockGroup?.options?.find(
+                  (item: any) => item.id === option.id
+                )
+
+                return {
+                  ...option,
+                  ...stockOption,
+                  priceModifier: Number(
+                    option.priceModifier ?? stockOption?.priceModifier ?? 0
+                  ),
+                  simpleCost:
+                    stockOption?.simpleCost == null
+                      ? option.simpleCost ?? null
+                      : Number(stockOption.simpleCost),
+                  referenceCost:
+                    stockOption?.referenceCost == null
+                      ? option.referenceCost ?? null
+                      : Number(stockOption.referenceCost),
+                  referenceQuantity:
+                    stockOption?.referenceQuantity == null
+                      ? option.referenceQuantity ?? null
+                      : Number(stockOption.referenceQuantity),
+                  recipeItems: (
+                    stockOption?.recipeItems ?? option.recipeItems ?? []
+                  ).map((item: any) => ({
+                    ...item,
+                    quantity: Number(item.quantity ?? 0),
+                  })),
+                }
+              }),
+            }
+          })
+          : stockProduct?.variationGroups ?? [],
+
+      recipeItems: (stockProduct?.recipeItems ?? product.recipeItems ?? []).map(
+        (item: any) => ({
+          ...item,
+          quantity: Number(item.quantity ?? 0),
+        })
+      ),
+
+      price: Number(product.price ?? stockProduct?.price ?? 0),
+
+      stockQuantity:
+        stockProduct?.stockQuantity == null
+          ? product.stockQuantity ?? null
+          : Number(stockProduct.stockQuantity),
+
+      minStock:
+        stockProduct?.minStock == null
+          ? product.minStock ?? null
+          : Number(stockProduct.minStock),
+
+      stockUnit: stockProduct?.stockUnit ?? product.stockUnit ?? null,
+
+      simpleCost:
+        stockProduct?.simpleCost == null
+          ? product.simpleCost ?? null
+          : Number(stockProduct.simpleCost),
+
+      referenceCost:
+        stockProduct?.referenceCost == null
+          ? product.referenceCost ?? null
+          : Number(stockProduct.referenceCost),
+
+      referenceQuantity:
+        stockProduct?.referenceQuantity == null
+          ? product.referenceQuantity ?? null
+          : Number(stockProduct.referenceQuantity),
+
+      unitContentQuantity:
+        stockProduct?.unitContentQuantity == null
+          ? product.unitContentQuantity ?? null
+          : Number(stockProduct.unitContentQuantity),
+
+      unitContentUnit:
+        stockProduct?.unitContentUnit ?? product.unitContentUnit ?? null,
+
+      recipeCost:
+        stockProduct?.recipeCost == null
+          ? product.recipeCost ?? null
+          : Number(stockProduct.recipeCost),
+
+      recipeOutputQuantity:
+        stockProduct?.recipeOutputQuantity == null
+          ? product.recipeOutputQuantity ?? null
+          : Number(stockProduct.recipeOutputQuantity),
+
+      recipeOutputUnit:
+        stockProduct?.recipeOutputUnit ?? product.recipeOutputUnit ?? null,
+    }
+  }) as Product[]
+}
+
 export default function POSPage() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false)
-  const [currentUser, setCurrentUser] = useState<string | null>(null)
   const [categories, setCategories] = useState<CategoryConfig[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string>('')
@@ -66,12 +210,65 @@ export default function POSPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [showOrdersList, setShowOrdersList] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
-  const [time, setTime] = useState<Date | null>(null)
-  const [isOnline, setIsOnline] = useState(true)
+
+  const [linkedCustomerId, setLinkedCustomerId] = useState<string | null>(null)
+  const [isLookingUpComanda, setIsLookingUpComanda] = useState(false)
+
+  const [currentOrderObservation, setCurrentOrderObservation] = useState('')
 
   const REQUIRE_COMANDA_STORAGE_KEY = 'ordr-settings-require-comanda'
   const [requireComanda, setRequireComanda] = useState(true)
   const taxRate = 0.1
+  const [activeEventDate, setActiveEventDate] = useState(() =>
+    getActiveEventDate()
+  )
+
+  const activeSalesEnvironmentId = activeEventDate?.salesEnvironmentId ?? null
+
+  useEffect(() => {
+    setActiveEventDate(getActiveEventDate())
+
+    return listenActiveEventChanged((eventDate) => {
+      setActiveEventDate(eventDate ?? getActiveEventDate())
+    })
+  }, [])
+
+  useEffect(() => {
+    async function lookupComandaCustomer() {
+      const eventDateId = activeEventDate?.id ?? getActiveEventDateId()
+      const comandaNumber = currentComandaNumber
+
+      if (!eventDateId || comandaNumber == null) {
+        setLinkedCustomerId(null)
+        return
+      }
+
+      try {
+        setIsLookingUpComanda(true)
+
+        const result = await lookupCustomerByEventComanda({
+          eventDateId,
+          comandaNumber,
+        })
+
+        if (result?.customer) {
+          setLinkedCustomerId(result.customer.id)
+          setCurrentComandaName(
+            result.comandaName?.trim() || result.customer.name
+          )
+        } else {
+          setLinkedCustomerId(null)
+        }
+      } catch (error) {
+        console.error('Erro ao buscar cliente da comanda:', error)
+        setLinkedCustomerId(null)
+      } finally {
+        setIsLookingUpComanda(false)
+      }
+    }
+
+    lookupComandaCustomer()
+  }, [activeEventDate?.id, currentComandaNumber])
 
   useEffect(() => {
     const savedRequireComanda = localStorage.getItem(REQUIRE_COMANDA_STORAGE_KEY)
@@ -82,61 +279,40 @@ export default function POSPage() {
 
   useEffect(() => {
     setCurrentOrderId(generateOrderId())
-    setTime(new Date())
-
-    const user = localStorage.getItem('ordr-user')
-    if (user) {
-      try {
-        const parsedUser = JSON.parse(user)
-        setCurrentUser(parsedUser.username ?? parsedUser)
-      } catch {
-        setCurrentUser(user)
-      }
-    } else {
-      router.push('/login')
-    }
-  }, [router])
-
-  useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000)
-    return () => clearInterval(timer)
   }, [])
 
   useEffect(() => {
-    setIsOnline(navigator.onLine)
-    const handleOnline = () => setIsOnline(true)
-    const handleOffline = () => setIsOnline(false)
-
-    window.addEventListener('online', handleOnline)
-    window.addEventListener('offline', handleOffline)
-
-    return () => {
-      window.removeEventListener('online', handleOnline)
-      window.removeEventListener('offline', handleOffline)
-    }
-  }, [])
-
-  useEffect(() => {
-    async function loadData() {
+    async function loadPage() {
       try {
-        const [productsData, categoriesData, ordersData] = await Promise.all([
-          getProducts(),
-          getCategories(),
-          getOrders(true),
-        ])
+        const [posProductsData, stockProductsData, categoriesData, ordersData] =
+          await Promise.all([
+            getProducts(),
+            getStockProducts(),
+            getCategories(),
+            getOrders(true),
+          ])
+
+        const productsData = mergeProductsWithStockInfo(
+          posProductsData,
+          stockProductsData
+        )
 
         setProducts(productsData)
-        setCategories(categoriesData)
 
-        if (categoriesData.length > 0) {
-          setSelectedCategory(categoriesData[0].id)
-        }
+        const categoriesWithProducts = getCategoriesWithSellableProducts(
+          categoriesData,
+          productsData
+        )
+        setCategories(categoriesWithProducts)
+        setSelectedCategory(categoriesWithProducts[0]?.id ?? '')
 
         const normalizedOrders: Order[] = ordersData
           .filter((order) => order.status === 'paid' || order.status === 'cancelled')
           .map((order) => ({
             ...order,
             total: Number(order.total ?? 0),
+            paymentMethod: order.paymentMethod ?? 'money',
+            taxApplied: order.taxApplied ?? true,
             createdAt: new Date(order.createdAt as any),
             paidAt: order.paidAt ? new Date(order.paidAt as any) : undefined,
           }))
@@ -145,12 +321,59 @@ export default function POSPage() {
         setOrders(normalizedOrders)
       } catch (error) {
         console.error('Erro ao carregar dados:', error)
+        router.push('/login')
       } finally {
         setIsLoading(false)
       }
     }
 
-    loadData()
+    loadPage()
+  }, [router])
+
+  useEffect(() => {
+    return listenStockUpdated(async () => {
+      try {
+        const [posProductsData, stockProductsData, categoriesData] =
+          await Promise.all([
+            getProducts(),
+            getStockProducts(),
+            getCategories(),
+          ])
+
+        const productsData = mergeProductsWithStockInfo(
+          posProductsData,
+          stockProductsData
+        )
+
+        const categoriesWithProducts = getCategoriesWithSellableProducts(
+          categoriesData,
+          productsData
+        )
+
+        setProducts(productsData)
+        setCategories(categoriesWithProducts)
+
+        setSelectedCategory((current) => {
+          if (current && categoriesWithProducts.some((category) => category.id === current)) {
+            return current
+          }
+
+          return categoriesWithProducts[0]?.id ?? ''
+        })
+
+        setCurrentOrderItems((currentItems) =>
+          currentItems.map((item) => {
+            const updatedProduct = productsData.find(
+              (product) => product.id === item.product.id
+            )
+
+            return updatedProduct ? { ...item, product: updatedProduct } : item
+          })
+        )
+      } catch (error) {
+        console.error('Erro ao atualizar produtos após estoque rápido:', error)
+      }
+    })
   }, [])
 
   useEffect(() => {
@@ -172,6 +395,8 @@ export default function POSPage() {
     const term = productSearch.trim().toLowerCase()
 
     return products.filter((product) => {
+      if (product.isStockOnly) return false
+
       const matchesSearch =
         term === '' ||
         product.name.toLowerCase().includes(term) ||
@@ -187,6 +412,25 @@ export default function POSPage() {
       return !selectedCategory || product.categoryId === selectedCategory
     })
   }, [products, selectedCategory, productSearch])
+
+
+  const handleSetItemNotes = useCallback(
+    (itemKey: string, notes: string) => {
+      if (isSubmittingOrder) return
+
+      setCurrentOrderItems((prev) =>
+        prev.map((item) =>
+          getItemKey(item) === itemKey
+            ? {
+              ...item,
+              notes,
+            }
+            : item
+        )
+      )
+    },
+    [isSubmittingOrder]
+  )
 
   const handleAddProduct = useCallback(
     (product: Product, variationSelections?: OrderItemVariationSelection[]) => {
@@ -247,14 +491,16 @@ export default function POSPage() {
   const handleClearOrder = useCallback(() => {
     if (isSubmittingOrder) return
 
+    setCurrentOrderObservation('')
     setCurrentOrderItems([])
     setCurrentOrderId(generateOrderId())
     setCurrentComandaNumber(null)
     setCurrentComandaName('')
+    setLinkedCustomerId(null)
     setApplyTax(true)
   }, [isSubmittingOrder])
 
-  const handleCharge = useCallback(async () => {
+  const handleCharge = useCallback(async (paymentMethod: PaymentMethod) => {
     try {
       if (isSubmittingOrder) return
 
@@ -276,34 +522,66 @@ export default function POSPage() {
       setIsSubmittingOrder(true)
 
       const subtotal = currentOrderItems.reduce(
-        (sum, item) => sum + Number(getItemPrice(item) ?? 0) * item.quantity,
+        (sum, item) => sum + Number(getItemPrice(item, activeSalesEnvironmentId) ?? 0) * item.quantity,
         0
       )
 
       const tax = applyTax ? subtotal * taxRate : 0
       const total = subtotal + tax
 
-      const newOrder = {
+      const newOrder: Order & { eventDateId?: string | null; customerId?: string | null } = {
         id: currentOrderId,
+        eventDateId: activeEventDate?.id ?? getActiveEventDateId(),
+        customerId: linkedCustomerId,
         comanda: currentComandaNumber ?? 0,
         comandaName: currentComandaName.trim() || null,
+        observation: currentOrderObservation.trim() || null,
         items: [...currentOrderItems],
         total,
-        status: 'paid' as const,
+        paymentMethod,
+        taxApplied: applyTax,
+        status: 'paid',
         createdAt: new Date(),
         paidAt: new Date(),
       }
 
-      console.log('SENDING ORDER:', newOrder)
+      const savedOrder = await createOrder(newOrder, activeSalesEnvironmentId)
 
-      const savedOrder = await createOrder(newOrder)
+      const [refreshedPosProducts, refreshedStockProducts] = await Promise.all([
+        getProducts(),
+        getStockProducts(),
+      ])
 
-      const normalizedOrder = {
+      const refreshedProducts = mergeProductsWithStockInfo(
+        refreshedPosProducts,
+        refreshedStockProducts
+      )
+
+      setProducts(refreshedProducts)
+
+      const categoriesWithProducts = getCategoriesWithSellableProducts(
+        categories,
+        refreshedProducts
+      )
+
+      setCategories(categoriesWithProducts)
+
+      if (
+        selectedCategory &&
+        !categoriesWithProducts.some((category) => category.id === selectedCategory)
+      ) {
+        setSelectedCategory(categoriesWithProducts[0]?.id ?? '')
+      }
+
+      const normalizedOrder: Order = {
         ...newOrder,
         id: savedOrder.id ?? newOrder.id,
         comanda: savedOrder.comanda ?? newOrder.comanda,
         comandaName: newOrder.comandaName,
+        observation: newOrder.observation,
         total: Number(savedOrder.total ?? newOrder.total ?? 0),
+        paymentMethod: savedOrder.paymentMethod ?? newOrder.paymentMethod,
+        taxApplied: savedOrder.taxApplied ?? newOrder.taxApplied,
         status: savedOrder.status ?? newOrder.status,
         items: newOrder.items,
         createdAt: savedOrder.createdAt
@@ -320,6 +598,8 @@ export default function POSPage() {
       setCurrentOrderId(generateOrderId())
       setCurrentComandaNumber(null)
       setCurrentComandaName('')
+      setLinkedCustomerId(null)
+      setCurrentOrderObservation('')
       setApplyTax(true)
     } catch (err) {
       console.error('Erro ao enviar pedido:', err)
@@ -327,13 +607,19 @@ export default function POSPage() {
       setIsSubmittingOrder(false)
     }
   }, [
+    activeEventDate,
+    activeSalesEnvironmentId,
     applyTax,
+    categories,
     currentComandaName,
     currentComandaNumber,
     currentOrderId,
     currentOrderItems,
     isSubmittingOrder,
     requireComanda,
+    currentOrderObservation,
+    linkedCustomerId,
+    selectedCategory,
   ])
 
   const handleSelectOrder = useCallback((order: Order) => {
@@ -346,29 +632,9 @@ export default function POSPage() {
     setSelectedOrder(null)
   }, [isSubmittingOrder])
 
-  const handleLogout = useCallback(async () => {
-    try {
-      if (isSubmittingOrder) return
-
-      await logout()
-
-      localStorage.removeItem('ordr-user')
-      setCurrentUser(null)
-      setCurrentOrderItems([])
-      setCurrentOrderId(generateOrderId())
-      setCurrentComandaNumber(null)
-      setCurrentComandaName('')
-      setApplyTax(true)
-
-      window.location.href = '/login'
-    } catch (error) {
-      console.error('Erro ao deslogar:', error)
-    }
-  }, [isSubmittingOrder])
-
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="h-full flex items-center justify-center bg-background">
         <div className="text-muted-foreground">Carregando...</div>
       </div>
     )
@@ -386,45 +652,6 @@ export default function POSPage() {
           </div>
         </div>
       )}
-
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">
-        <h1 className="text-lg font-semibold text-foreground">Ponto de Venda</h1>
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            {isOnline ? (
-              <Wifi className="h-4 w-4 text-success" />
-            ) : (
-              <WifiOff className="h-4 w-4 text-destructive" />
-            )}
-            <span
-              className={`text-sm ${isOnline ? 'text-success' : 'text-destructive'}`}
-            >
-              {isOnline ? 'Conectado' : 'Desconectado'}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Clock className="h-4 w-4" />
-            <span className="text-sm font-mono" suppressHydrationWarning>
-              {time?.toLocaleTimeString('pt-BR', {
-                hour: '2-digit',
-                minute: '2-digit',
-              }) || '--:--'}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">{currentUser}</span>
-            <button
-              onClick={handleLogout}
-              disabled={isSubmittingOrder}
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Sair
-            </button>
-          </div>
-        </div>
-      </div>
 
       <div className="flex flex-1 overflow-hidden">
         {showOrdersList && (
@@ -448,11 +675,10 @@ export default function POSPage() {
             <button
               onClick={() => !isSubmittingOrder && setShowOrdersList(!showOrdersList)}
               disabled={isSubmittingOrder}
-              className={`flex items-center gap-2 px-5 py-4 border-r border-border transition-colors shrink-0 ${
-                showOrdersList
+              className={`flex items-center gap-2 px-5 py-4 border-r border-border transition-colors shrink-0 ${showOrdersList
                   ? 'bg-primary/10 text-primary'
                   : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
             >
               <ListOrdered className="h-5 w-5" />
               <span className="text-sm font-medium">Pedidos</span>
@@ -468,7 +694,7 @@ export default function POSPage() {
                 <CategoryTabs
                   categories={categories}
                   selected={selectedCategory}
-                  onSelect={isSubmittingOrder ? () => {} : setSelectedCategory}
+                  onSelect={isSubmittingOrder ? () => { } : setSelectedCategory}
                 />
               ) : (
                 <div className="px-5 py-4 text-sm text-muted-foreground">
@@ -494,8 +720,10 @@ export default function POSPage() {
           <ProductGrid
             category={productSearch.trim() ? '' : selectedCategory}
             products={filteredProducts}
+            allProducts={products}
             categories={categories}
             onAddProduct={handleAddProduct}
+            salesEnvironmentId={activeSalesEnvironmentId}
           />
         </div>
 
@@ -504,6 +732,7 @@ export default function POSPage() {
           orderId={currentOrderId}
           comandaNumber={currentComandaNumber}
           comandaName={currentComandaName}
+          orderObservation={currentOrderObservation}
           applyTax={applyTax}
           requireComanda={requireComanda}
           taxRate={taxRate}
@@ -513,6 +742,8 @@ export default function POSPage() {
           onCharge={handleCharge}
           onSetComandaNumber={setCurrentComandaNumber}
           onSetComandaName={setCurrentComandaName}
+          onSetOrderObservation={setCurrentOrderObservation}
+          onSetItemNotes={handleSetItemNotes}
           onSetApplyTax={setApplyTax}
           isLoading={isSubmittingOrder}
         />

@@ -12,15 +12,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
-const handleLogin = async () => {
-  try {
-    const result = await login(username, password)
-    localStorage.setItem('ordr-user', JSON.stringify(result.user))
-    router.push('/PDV')
-  } catch (err) {
-    setError('Usuário ou senha inválidos')
+  const handleLogin = async () => {
+    try {
+      setError('')
+      const result = await login(username, password)
+      localStorage.setItem('ordr-user', JSON.stringify(result.user))
+      router.push('/PDV')
+    } catch (err) {
+      localStorage.removeItem('ordr-user')
+      setError('Usuário ou senha inválidos')
+    }
   }
-}
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">

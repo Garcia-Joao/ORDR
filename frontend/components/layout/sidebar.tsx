@@ -12,136 +12,456 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   ClipboardList,
-  Download,
-  Loader2,
+  HandCoins,
+  Boxes,
+  Moon,
+  Sun,
+  Sparkles,
+  LayoutDashboard,
+  SlidersHorizontal,
+  UserRoundCog,
+  CalendarDays,
 } from 'lucide-react'
-import { useState } from 'react'
-import { downloadOrdersReportPdf } from '@/lib/api/orders-report'
+import { useEffect, useMemo, useState } from 'react'
 
-const navItems = [
-  { href: '/PDV', icon: ShoppingCart, label: 'PDV', description: 'Ponto de Venda' },
-  { href: '/produtos', icon: Package, label: 'Produtos', description: 'Gerenciar cardápio' },
-  { href: '/pedidos', icon: ClipboardList, label: 'Pedidos', description: 'Visualizar Pedidos' },
-  { href: '/clientes', icon: Users, label: 'Clientes', description: 'Cadastro de clientes' },
-  { href: '/relatorios', icon: BarChart3, label: 'Relatórios', description: 'Vendas e análises' },
-  { href: '/impressoras', icon: Printer, label: 'Impressoras', description: 'Configurar impressoras' },
-  { href: '/dispositivos', icon: Monitor, label: 'Dispositivos', description: 'Gerenciar terminais' },
-  { href: '/configuracoes', icon: Settings, label: 'Configurações', description: 'Ajustes do sistema' },
+type NavItem = {
+  href: string
+  icon: React.ElementType
+  label: string
+  description: string
+}
+
+type NavGroup = {
+  id: string
+  title: string
+  icon: React.ElementType
+  items: NavItem[]
+}
+
+const navGroups: NavGroup[] = [
+  {
+    id: 'operation',
+    title: 'Operação',
+    icon: LayoutDashboard,
+    items: [
+      {
+        href: '/PDV',
+        icon: ShoppingCart,
+        label: 'PDV',
+        description: 'Ponto de venda principal',
+      },
+      {
+        href: '/Interno',
+        icon: HandCoins,
+        label: 'PDV Interno',
+        description: 'Contas internas do dia',
+      },
+      {
+        href: '/pedidos',
+        icon: ClipboardList,
+        label: 'Pedidos',
+        description: 'Pedidos e cancelamentos',
+      },
+      {
+        href: '/clientes',
+        icon: Users,
+        label: 'Clientes',
+        description: 'Cadastro de clientes',
+      },
+    ],
+  },
+  {
+    id: 'management',
+    title: 'Gestão',
+    icon: SlidersHorizontal,
+    items: [
+      {
+        href: '/produtos',
+        icon: Package,
+        label: 'Produtos',
+        description: 'Cardápio e preços',
+      },
+      {
+        href: '/estoque',
+        icon: Boxes,
+        label: 'Estoque',
+        description: 'Receitas, custos e produção',
+      },
+      {
+        href: '/compras',
+        icon: ShoppingCart,
+        label: 'Compras',
+        description: 'Pedidos de compra e recebimento',
+      },
+      {
+        href: '/pessoas',
+        icon: UserRoundCog,
+        label: 'Pessoas',
+        description: 'Equipe, músicos e freelancers',
+      },
+      {
+        href: '/eventos',
+        icon: CalendarDays,
+        label: 'Eventos',
+        description: 'Agenda e equipe de eventos',
+      },
+      {
+        href: '/relatorios',
+        icon: BarChart3,
+        label: 'Relatórios',
+        description: 'Vendas e análises',
+      },
+    ],
+  },
+  {
+    id: 'system',
+    title: 'Sistema',
+    icon: Settings,
+    items: [
+      {
+        href: '/impressoras',
+        icon: Printer,
+        label: 'Impressoras',
+        description: 'Tickets e térmicas',
+      },
+      {
+        href: '/dispositivos',
+        icon: Monitor,
+        label: 'Dispositivos',
+        description: 'Terminais e acessos',
+      },
+      {
+        href: '/configuracoes',
+        icon: Settings,
+        label: 'Configurações',
+        description: 'Ajustes do sistema',
+      },
+    ],
+  },
 ]
+
+function isRouteActive(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`)
+}
+
+function getInitialOpenGroups(pathname: string) {
+  const state: Record<string, boolean> = {}
+
+  for (const group of navGroups) {
+    const hasActiveItem = group.items.some((item) =>
+      isRouteActive(pathname, item.href)
+    )
+
+    state[group.id] = hasActiveItem || group.id === 'operation'
+  }
+
+  return state
+}
 
 export function Sidebar() {
   const pathname = usePathname()
-  const [collapsed, setCollapsed] = useState(false)
-  const [isDownloadingReport, setIsDownloadingReport] = useState(false)
 
-  const handleDownloadReport = async () => {
-    try {
-      setIsDownloadingReport(true)
-      await downloadOrdersReportPdf()
-    } catch (error: any) {
-      console.error('Erro ao baixar relatório:', error)
-      alert(error?.message || 'Erro ao baixar relatório')
-    } finally {
-      setIsDownloadingReport(false)
-    }
+  const [collapsed, setCollapsed] = useState(false)
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark')
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    getInitialOpenGroups(pathname)
+  )
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('ordr-theme') as 'light' | 'dark' | null
+
+    const initialTheme =
+      savedTheme ??
+      (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+
+    setTheme(initialTheme)
+    document.documentElement.classList.toggle('dark', initialTheme === 'dark')
+  }, [])
+
+  useEffect(() => {
+    setOpenGroups((current) => {
+      const next = { ...current }
+
+      for (const group of navGroups) {
+        const hasActiveItem = group.items.some((item) =>
+          isRouteActive(pathname, item.href)
+        )
+
+        if (hasActiveItem) {
+          next[group.id] = true
+        }
+      }
+
+      return next
+    })
+  }, [pathname])
+
+  function toggleTheme() {
+    setTheme((current) => {
+      const next = current === 'dark' ? 'light' : 'dark'
+
+      localStorage.setItem('ordr-theme', next)
+      document.documentElement.classList.toggle('dark', next === 'dark')
+
+      return next
+    })
   }
+
+  function toggleGroup(groupId: string) {
+    setOpenGroups((current) => ({
+      ...current,
+      [groupId]: !current[groupId],
+    }))
+  }
+
+  const activeGroupTitle = useMemo(() => {
+    const group = navGroups.find((navGroup) =>
+      navGroup.items.some((item) => isRouteActive(pathname, item.href))
+    )
+
+    return group?.title ?? null
+  }, [pathname])
 
   return (
     <aside
-      className={`flex flex-col h-screen bg-sidebar border-r border-sidebar-border transition-all duration-300 ${
-        collapsed ? 'w-[72px]' : 'w-[240px]'
-      }`}
+      className={`group/sidebar relative flex h-screen flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-out ${collapsed ? 'w-[78px]' : 'w-[272px]'
+        }`}
     >
-      {/* Logo */}
-      <div className="flex items-center justify-between px-4 py-5 border-b border-sidebar-border">
-        {!collapsed && (
-          <Link href="/PDV" className="flex items-center gap-2">
-            <span className="text-xl font-bold text-sidebar-primary">Ordr</span>
-            <span className="text-xs text-sidebar-foreground/60 font-medium">POS</span>
-          </Link>
-        )}
-        {collapsed && (
-          <Link href="/PDV" className="mx-auto">
-            <span className="text-xl font-bold text-sidebar-primary">O</span>
-          </Link>
-        )}
-      </div>
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-sidebar-primary/10 to-transparent" />
 
-      {/* Navigation */}
-      <nav className="flex-1 py-4 overflow-y-auto">
-        <ul className="flex flex-col gap-1 px-2">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href
-
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  className={`flex items-center gap-3 px-3 py-3 rounded-lg transition-colors ${
-                    isActive
-                      ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-                      : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                  } ${collapsed ? 'justify-center' : ''}`}
-                  title={collapsed ? item.label : undefined}
-                >
-                  <item.icon className="h-5 w-5 flex-shrink-0" />
-                  {!collapsed && (
-                    <div className="flex flex-col">
-                      <span className="text-sm font-medium">{item.label}</span>
-                      {!isActive && (
-                        <span className="text-xs text-sidebar-foreground/50">
-                          {item.description}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </Link>
-              </li>
-            )
-          })}
-        </ul>
-      </nav>
-
-      {/* Report Download Button */}
-      <div className="p-2 border-t border-sidebar-border">
-        <button
-          onClick={handleDownloadReport}
-          disabled={isDownloadingReport}
-          className={`flex items-center w-full py-2 rounded-lg transition-colors text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed ${
-            collapsed ? 'justify-center px-2' : 'justify-start px-3'
-          }`}
-          title={collapsed ? 'Baixar relatório PDF' : undefined}
+      <div className="relative border-b border-sidebar-border px-3 py-4">
+        <div
+          className={`flex items-center gap-3 ${collapsed ? 'justify-center' : 'justify-between'
+            }`}
         >
-          {isDownloadingReport ? (
-            <Loader2 className="h-5 w-5 animate-spin flex-shrink-0" />
-          ) : (
-            <Download className="h-5 w-5 flex-shrink-0" />
-          )}
+          <Link
+            href="/PDV"
+            title={collapsed ? 'PDV' : undefined}
+            className={`flex min-w-0 items-center gap-3 transition-all duration-300 ${collapsed ? 'justify-center' : ''
+              }`}
+          >
+            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-sidebar-primary text-sidebar-primary-foreground shadow-sm transition-transform duration-300 hover:scale-105">
+              <span className="text-lg font-black">O</span>
+
+              {!collapsed && (
+                <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-background shadow-sm">
+                  <Sparkles className="h-3 w-3 text-sidebar-primary" />
+                </span>
+              )}
+            </div>
+
+            {!collapsed && (
+              <div className="min-w-0 animate-in fade-in slide-in-from-left-2 duration-300">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xl font-black tracking-tight text-sidebar-primary">
+                    Ordr
+                  </span>
+                  <span className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-semibold text-sidebar-foreground/60">
+                    POS
+                  </span>
+                </div>
+                <p className="truncate text-xs text-sidebar-foreground/55">
+                  Bar, eventos e comandas
+                </p>
+              </div>
+            )}
+          </Link>
 
           {!collapsed && (
-            <span className="ml-3 text-sm font-medium">
-              {isDownloadingReport ? 'Baixando PDF...' : 'Relatório PDF'}
-            </span>
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              title="Recolher menu"
+              aria-label="Recolher menu"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-sidebar-border bg-sidebar-accent/50 text-sidebar-foreground/70 transition-all duration-200 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:scale-105"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
           )}
-        </button>
+        </div>
+
+        {collapsed && (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            title="Expandir menu"
+            aria-label="Expandir menu"
+            className="mt-3 flex h-9 w-full items-center justify-center rounded-xl border border-sidebar-border bg-sidebar-accent/50 text-sidebar-foreground/70 transition-all duration-200 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:scale-105"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
-      {/* Collapse Button */}
-      <div className="p-2 border-t border-sidebar-border">
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="flex items-center justify-center w-full py-2 rounded-lg text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+      {!collapsed && activeGroupTitle && (
+        <div className="relative px-4 pt-4">
+          <div className="rounded-2xl border border-sidebar-border bg-sidebar-accent/40 px-4 py-3">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-sidebar-foreground/50">
+              Área atual
+            </p>
+            <p className="mt-1 text-sm font-semibold text-sidebar-foreground">
+              {activeGroupTitle}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <nav className="relative flex-1 overflow-y-auto px-2 py-4">
+        <div className="space-y-3">
+          {navGroups.map((group) => {
+            const GroupIcon = group.icon
+            const isOpen = collapsed || openGroups[group.id]
+            const hasActiveItem = group.items.some((item) =>
+              isRouteActive(pathname, item.href)
+            )
+
+            return (
+              <section
+                key={group.id}
+                className={`rounded-2xl transition-colors duration-200 ${!collapsed && hasActiveItem ? 'bg-sidebar-accent/25' : ''
+                  }`}
+              >
+                {!collapsed ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    className="flex w-full items-center justify-between gap-2 rounded-2xl px-3 py-2 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <GroupIcon className="h-3.5 w-3.5 shrink-0 text-sidebar-foreground/45" />
+                      <span className="truncate text-[11px] font-semibold uppercase tracking-[0.14em]">
+                        {group.title}
+                      </span>
+                    </span>
+
+                    <ChevronDown
+                      className={`h-4 w-4 shrink-0 transition-transform duration-300 ${isOpen ? 'rotate-180' : 'rotate-0'
+                        }`}
+                    />
+                  </button>
+                ) : (
+                  <div
+                    title={group.title}
+                    className="mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-xl text-sidebar-foreground/45"
+                  >
+                    <GroupIcon className="h-4 w-4" />
+                  </div>
+                )}
+
+                <div
+                  className={`grid transition-all duration-300 ease-out ${isOpen
+                    ? 'grid-rows-[1fr] opacity-100'
+                    : 'grid-rows-[0fr] opacity-0'
+                    }`}
+                >
+                  <div className="overflow-hidden">
+                    <ul className="space-y-1 pb-2">
+                      {group.items.map((item) => {
+                        const Icon = item.icon
+                        const isActive = isRouteActive(pathname, item.href)
+
+                        return (
+                          <li key={item.href}>
+                            <Link
+                              href={item.href}
+                              title={collapsed ? item.label : undefined}
+                              className={`relative flex items-center rounded-2xl transition-all duration-200 ${collapsed
+                                ? 'mx-auto h-11 w-11 justify-center'
+                                : 'gap-3 px-3 py-3'
+                                } ${isActive
+                                  ? 'bg-sidebar-primary text-sidebar-primary-foreground shadow-sm'
+                                  : 'text-sidebar-foreground/78 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                                }`}
+                            >
+                              {isActive && (
+                                <span
+                                  className={`absolute rounded-full bg-sidebar-primary-foreground/80 ${collapsed
+                                    ? '-right-1 top-1/2 h-5 w-1 -translate-y-1/2'
+                                    : 'left-1 top-1/2 h-6 w-1 -translate-y-1/2'
+                                    }`}
+                                />
+                              )}
+
+                              <Icon
+                                className={`h-5 w-5 shrink-0 transition-transform duration-200 ${isActive ? 'scale-105' : 'group-hover/sidebar:scale-100'
+                                  }`}
+                              />
+
+                              {!collapsed && (
+                                <div className="min-w-0 animate-in fade-in slide-in-from-left-1 duration-200">
+                                  <p className="truncate text-sm font-semibold">
+                                    {item.label}
+                                  </p>
+                                  <p
+                                    className={`truncate text-xs ${isActive
+                                      ? 'text-sidebar-primary-foreground/70'
+                                      : 'text-sidebar-foreground/45'
+                                      }`}
+                                  >
+                                    {item.description}
+                                  </p>
+                                </div>
+                              )}
+                            </Link>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                </div>
+              </section>
+            )
+          })}
+        </div>
+      </nav>
+
+      <div className="relative border-t border-sidebar-border p-3">
+        <div
+          className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between gap-3'
+            }`}
         >
-          {collapsed ? (
-            <ChevronRight className="h-5 w-5" />
-          ) : (
-            <>
-              <ChevronLeft className="h-5 w-5" />
-              <span className="ml-2 text-sm">Recolher</span>
-            </>
+          {!collapsed && (
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-sidebar-foreground/70">
+                Aparência
+              </p>
+              <p className="text-[11px] text-sidebar-foreground/45">
+                {theme === 'dark' ? 'Tema escuro' : 'Tema claro'}
+              </p>
+            </div>
           )}
-        </button>
+
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+            aria-label={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+            className={`relative flex h-9 w-[62px] shrink-0 items-center rounded-full border border-sidebar-border bg-sidebar-accent/70 p-1 transition-colors duration-300 hover:bg-sidebar-accent ${theme === 'dark' ? 'justify-end' : 'justify-start'
+              }`}
+          >
+            <span
+              className={`absolute inset-y-1 left-1 h-7 w-7 rounded-full bg-sidebar-primary shadow-sm transition-transform duration-300 ease-out ${theme === 'dark' ? 'translate-x-[26px]' : 'translate-x-0'
+                }`}
+            />
+
+            <span className="relative z-10 flex h-7 w-7 items-center justify-center">
+              <Sun
+                className={`absolute h-4 w-4 text-sidebar-primary-foreground transition-all duration-300 ${theme === 'light'
+                  ? 'rotate-0 scale-100 opacity-100'
+                  : 'rotate-90 scale-50 opacity-0'
+                  }`}
+              />
+              <Moon
+                className={`absolute h-4 w-4 text-sidebar-primary-foreground transition-all duration-300 ${theme === 'dark'
+                  ? 'rotate-0 scale-100 opacity-100'
+                  : '-rotate-90 scale-50 opacity-0'
+                  }`}
+              />
+            </span>
+          </button>
+        </div>
       </div>
     </aside>
   )

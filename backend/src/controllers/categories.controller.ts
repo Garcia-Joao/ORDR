@@ -56,15 +56,19 @@ export async function getCategoryById(req: AuthRequest, res: Response) {
 export async function createCategory(req: AuthRequest, res: Response) {
   try {
     const companyId = req.user?.companyId
+    const userId = req.user?.id
 
-    if (!companyId) {
+    if (!companyId || !userId) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
 
-    const category = await categoriesService.createCategory({
-      companyId,
-      ...req.body,
-    })
+    const category = await categoriesService.createCategory(
+      {
+        companyId,
+        ...req.body,
+      },
+      userId
+    )
 
     return res.status(201).json(category)
   } catch (error: any) {
@@ -83,13 +87,20 @@ export async function createCategory(req: AuthRequest, res: Response) {
 export async function updateCategory(req: AuthRequest, res: Response) {
   try {
     const companyId = req.user?.companyId
+    const userId = req.user?.id
     const id = getSingleParam(req.params.id)
 
-    if (!companyId) {
+    if (!companyId || !userId) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
 
-    const category = await categoriesService.updateCategory(id, companyId, req.body)
+    const category = await categoriesService.updateCategory(
+      id,
+      companyId,
+      req.body,
+      userId
+    )
+
     return res.json(category)
   } catch (error: any) {
     console.error(error)
@@ -109,13 +120,14 @@ export async function updateCategory(req: AuthRequest, res: Response) {
 export async function deleteCategory(req: AuthRequest, res: Response) {
   try {
     const companyId = req.user?.companyId
+    const userId = req.user?.id
     const id = getSingleParam(req.params.id)
 
-    if (!companyId) {
+    if (!companyId || !userId) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
 
-    await categoriesService.deleteCategory(id, companyId)
+    await categoriesService.deleteCategory(id, companyId, userId)
     return res.json({ ok: true })
   } catch (error: any) {
     console.error(error)

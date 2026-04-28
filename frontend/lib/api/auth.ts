@@ -12,7 +12,19 @@ export type AuthUser = {
   username: string
   role: string
   companyId: string
-  companies: AuthCompany[]
+  companies?: AuthCompany[]
+  name?: string | null
+  phone?: string | null
+  photoBase64?: string | null
+}
+
+export type UpdateMyAccountInput = {
+  name?: string
+  username?: string
+  phone?: string
+  photoBase64?: string | null
+  currentPassword?: string
+  newPassword?: string
 }
 
 export function login(username: string, password: string) {
@@ -28,9 +40,20 @@ export function logout() {
   })
 }
 
-export function getMe() {
-  return apiFetch<{ user: AuthUser }>('/auth/me')
+export function me() {
+  return apiFetch<{ user: AuthUser }>('/auth/me', {
+    method: 'GET',
+  })
 }
+
+export function updateMe(data: UpdateMyAccountInput) {
+  return apiFetch<{ user: AuthUser }>('/auth/me', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export const getMe = me
 
 export function switchCompany(companyId: string) {
   return apiFetch<{ user: AuthUser }>('/auth/switch-company', {

@@ -8,11 +8,16 @@ export function proxy(request: NextRequest) {
 
   const protectedRoutes = [
     '/PDV',
+    '/Interno',
     '/pedidos',
     '/produtos',
     '/clientes',
+    '/pessoas',
     '/relatorios',
     '/dispositivos',
+    '/impressoras',
+    '/configuracoes',
+    '/estoque',
   ]
 
   const isProtectedRoute = protectedRoutes.some((route) =>
@@ -33,11 +38,16 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     '/PDV/:path*',
+    '/Interno/:path*',
     '/pedidos/:path*',
     '/login',
     '/produtos/:path*',
     '/clientes/:path*',
+    '/pessoas/:path*',
     '/relatorios/:path*',
     '/dispositivos/:path*',
+    '/impressoras/:path*',
+    '/configuracoes/:path*',
+    '/estoque/:path*',
   ],
 }

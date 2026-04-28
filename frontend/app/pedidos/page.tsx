@@ -11,12 +11,19 @@ import {
   ChevronRight,
   Loader2,
   Calendar,
+  Clock3,
 } from 'lucide-react'
 import type { Order, OrderItem } from '@/lib/pos-types'
 import { formatBRL, getItemPrice } from '@/lib/pos-types'
 import { cancelOrder, getOrders } from '@/lib/api/orders'
 
 const statusConfig = {
+  pending: {
+    icon: Clock3,
+    label: 'Pendente',
+    color: 'text-warning bg-warning/20',
+    dot: 'bg-warning',
+  },
   paid: {
     icon: Check,
     label: 'Confirmado',
@@ -90,7 +97,7 @@ export default function PedidosPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isCancelling, setIsCancelling] = useState(false)
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'cancelled'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'paid' | 'cancelled'>('all')
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [fromDate, setFromDate] = useState(() => toDateInputValue(new Date()))
   const [toDate, setToDate] = useState(() => toDateInputValue(new Date()))
@@ -103,14 +110,12 @@ export default function PedidosPage() {
       try {
         const ordersData = await getOrders(true)
 
-        const normalizedOrders: Order[] = ordersData
-          .filter((order) => order.status === 'paid' || order.status === 'cancelled')
-          .map((order) => ({
-            ...order,
-            total: Number(order.total ?? 0),
-            createdAt: new Date(order.createdAt as any),
-            paidAt: order.paidAt ? new Date(order.paidAt as any) : undefined,
-          }))
+        const normalizedOrders: Order[] = ordersData.map((order) => ({
+          ...order,
+          total: Number(order.total ?? 0),
+          createdAt: new Date(order.createdAt as any),
+          paidAt: order.paidAt ? new Date(order.paidAt as any) : undefined,
+        }))
 
         setOrders(normalizedOrders)
       } catch (error) {
@@ -124,7 +129,7 @@ export default function PedidosPage() {
   }, [])
 
   const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
+    return orders.filter((order: any) => {
       const matchesStatus =
         statusFilter === 'all' || order.status === statusFilter
 
@@ -139,7 +144,8 @@ export default function PedidosPage() {
         term === '' ||
         String(order.comanda).includes(term) ||
         order.id.toLowerCase().includes(term) ||
-        (order.comandaName ?? '').toLowerCase().includes(term)
+        (order.comandaName ?? '').toLowerCase().includes(term) ||
+        (order.internalCustomer?.name ?? '').toLowerCase().includes(term)
 
       return matchesStatus && matchesDate && matchesSearch
     })
@@ -156,7 +162,7 @@ export default function PedidosPage() {
   }, [filteredOrders, selectedOrder])
 
   const selectedConfig = selectedOrder
-    ? statusConfig[selectedOrder.status as 'paid' | 'cancelled']
+    ? statusConfig[selectedOrder.status as 'pending' | 'paid' | 'cancelled']
     : null
 
   const handleCancelOrder = async () => {
@@ -214,11 +220,11 @@ export default function PedidosPage() {
       </div>
 
       <div className="px-6 py-4 border-b border-border bg-card/50 flex items-center gap-4 flex-wrap">
-        <div className="relative flex-1 min-w-[260px] max-w-md">
+        <div className="relative flex-1 min-w-65 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Buscar por comanda, nome ou ID..."
+            placeholder="Buscar por comanda, nome, cliente interno ou ID..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-input border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -285,7 +291,7 @@ export default function PedidosPage() {
         </button>
 
         <div className="flex items-center gap-2">
-          {(['all', 'paid', 'cancelled'] as const).map((status) => {
+          {(['all', 'pending', 'paid', 'cancelled'] as const).map((status) => {
             const isActive = statusFilter === status
             const label =
               status === 'all'
@@ -310,7 +316,7 @@ export default function PedidosPage() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-[380px] border-r border-border bg-card flex flex-col">
+        <div className="w-95 border-r border-border bg-card flex flex-col">
           <div className="px-5 py-4 border-b border-border">
             <h2 className="text-lg font-semibold text-foreground">Lista de pedidos</h2>
           </div>
@@ -329,10 +335,11 @@ export default function PedidosPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                {filteredOrders.map((order) => {
-                  const config = statusConfig[order.status as 'paid' | 'cancelled']
+                {filteredOrders.map((order: any) => {
+                  const config = statusConfig[order.status as 'pending' | 'paid' | 'cancelled']
                   const Icon = config.icon
                   const isSelected = selectedOrder?.id === order.id
+                  const itemsCount = order.items.reduce((sum: number, item: OrderItem) => sum + item.quantity, 0)
 
                   return (
                     <button
@@ -365,9 +372,14 @@ export default function PedidosPage() {
                           </p>
                         )}
 
+                        {!!order.internalCustomer?.name && (
+                          <p className="text-xs text-muted-foreground mt-1 truncate">
+                            Cliente interno: {order.internalCustomer.name}
+                          </p>
+                        )}
+
                         <p className="text-sm text-muted-foreground mt-0.5">
-                          {order.items.reduce((sum, item) => sum + item.quantity, 0)}{' '}
-                          {order.items.reduce((sum, item) => sum + item.quantity, 0) !== 1 ? 'itens' : 'item'} • {formatBRL(order.total)}
+                          {itemsCount} {itemsCount !== 1 ? 'itens' : 'item'} • {formatBRL(order.total)}
                         </p>
 
                         <p className="text-xs text-muted-foreground/70 mt-1">
@@ -417,9 +429,16 @@ export default function PedidosPage() {
                       </p>
                     )}
 
+                    {!!(selectedOrder as any).internalCustomer?.name && (
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Cliente interno: {(selectedOrder as any).internalCustomer.name}
+                      </p>
+                    )}
+
                     <p className="text-sm text-muted-foreground mt-2 font-mono">
                       Pedido #{selectedOrder.id}
                     </p>
+
                     <p className="text-sm text-muted-foreground mt-1">
                       Criado em{' '}
                       {new Date(selectedOrder.createdAt).toLocaleDateString('pt-BR')}{' '}
@@ -437,6 +456,12 @@ export default function PedidosPage() {
                           hour: '2-digit',
                           minute: '2-digit',
                         })}
+                      </p>
+                    )}
+
+                    {(selectedOrder as any).paymentMethod && (
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Pagamento: {(selectedOrder as any).paymentMethod}
                       </p>
                     )}
                   </div>

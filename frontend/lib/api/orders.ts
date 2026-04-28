@@ -1,6 +1,68 @@
-import { apiFetch } from './client'
-import type { Order } from '../pos-types'
-import { getItemPrice } from '../pos-types'
+import type { Order } from '@/lib/pos-types'
+import {
+  getItemPrice,
+  getVariationOptionPriceModifierForEnvironment,
+} from '@/lib/pos-types'
+import { apiFetch } from '@/lib/api/client'
+
+export async function createOrder(
+  order: Order & { eventDateId?: string | null; customerId?: string | null },
+  salesEnvironmentId?: string | null
+): Promise<any> {
+  const payload = {
+    id: order.id,
+    internalCustomerId: order.internalCustomerId ?? null,
+    eventDateId: order.eventDateId ?? null,
+    customerId: order.customerId ?? null,
+    comanda: order.comanda,
+    comandaName: order.comandaName ?? null,
+    observation: order.observation ?? order.notes ?? null,
+    createdAt: order.createdAt,
+    paidAt: order.paidAt ?? null,
+    status: order.status,
+    total: order.total,
+    paymentMethod: order.paymentMethod ?? null,
+    taxApplied: order.taxApplied,
+    orderItems: order.items.map((item) => {
+      const unitPrice = Number(getItemPrice(item, salesEnvironmentId) ?? 0)
+
+      return {
+        productId: item.product.id,
+        quantity: item.quantity,
+        unitPrice,
+        totalPrice: unitPrice * item.quantity,
+        notes: item.notes ?? null,
+        variations: (item.variationSelections ?? []).map((selection) => {
+          const group = item.product.variationGroups?.find(
+            (variationGroup) => variationGroup.id === selection.groupId
+          )
+
+          return {
+            groupId: selection.groupId,
+            options: selection.selectedOptionIds.map((optionId) => {
+              const option = group?.options.find((item) => item.id === optionId)
+
+              return {
+                optionId,
+                priceModifier: option
+                  ? getVariationOptionPriceModifierForEnvironment(
+                      option,
+                      salesEnvironmentId
+                    )
+                  : 0,
+              }
+            }),
+          }
+        }),
+      }
+    }),
+  }
+
+  return apiFetch('/orders', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
 
 export type CreateOrderResponse = {
   id: string
@@ -8,6 +70,8 @@ export type CreateOrderResponse = {
   comandaName?: string | null
   total: number
   status: 'pending' | 'paid' | 'cancelled'
+  paymentMethod?: 'money' | 'pix' | 'credit' | 'debit' | null
+  taxApplied: boolean
   createdAt: string | Date
   paidAt?: string | Date | null
 }
@@ -17,49 +81,6 @@ type OrdersListResponse = Array<Order & {
   createdAt: string
   paidAt?: string | null
 }>
-
-export function createOrder(order: Order) {
-  return apiFetch<CreateOrderResponse>('/orders', {
-    method: 'POST',
-    body: JSON.stringify({
-      id: order.id,
-      comanda: order.comanda,
-      status: order.status,
-      total: order.total,
-      createdAt: order.createdAt,
-      paidAt: order.paidAt ?? null,
-      orderItems: order.items.map((item) => {
-        const unitPrice = Number(getItemPrice(item) ?? 0)
-        const totalPrice = unitPrice * item.quantity
-
-        return {
-          productId: item.product.id,
-          quantity: item.quantity,
-          unitPrice,
-          totalPrice,
-          notes: null,
-          variations: (item.variationSelections ?? []).map((selection) => {
-            const group = item.product.variationGroups?.find(
-              (g) => g.id === selection.groupId
-            )
-
-            return {
-              groupId: selection.groupId,
-              options: selection.selectedOptionIds.map((optionId) => {
-                const option = group?.options.find((o) => o.id === optionId)
-
-                return {
-                  optionId,
-                  priceModifier: Number(option?.priceModifier ?? 0),
-                }
-              }),
-            }
-          }),
-        }
-      }),
-    }),
-  })
-}
 
 export function getOrders(includeCancelled = true) {
   const query = includeCancelled ? '?includeCancelled=true' : ''
