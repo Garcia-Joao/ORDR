@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import { createAuditLog } from './audit.service'
+import { createProductCostHistoryEntry } from './product-cost-history.service'
 
 type ProductEnvironmentPriceInput = {
   salesEnvironmentId: string
@@ -278,6 +279,51 @@ function validateRecipeOutput(data: {
   if (!data.recipeOutputUnit) {
     throw new Error('RECIPE_OUTPUT_UNIT_REQUIRED')
   }
+}
+
+
+function pickProductCostHistorySnapshot(product: any) {
+  return {
+    categoryId: product.categoryId ?? null,
+    simpleCost: product.simpleCost ?? null,
+    referenceCost: product.referenceCost ?? null,
+    referenceQuantity: product.referenceQuantity ?? null,
+    stockUnit: product.stockUnit ?? null,
+    unitContentQuantity: product.unitContentQuantity ?? null,
+    unitContentUnit: product.unitContentUnit ?? null,
+  }
+}
+
+type CostRelevantInput = {
+  categoryId?: string | null
+  costMode?: 'simple' | 'recipe'
+  simpleCost?: number | null
+  stockUnit?: 'unit' | 'ml' | 'l' | 'g' | 'kg' | null
+  referenceQuantity?: number | null
+  referenceCost?: number | null
+  unitContentQuantity?: number | null
+  unitContentUnit?: 'ml' | 'l' | 'g' | 'kg' | null
+  recipeOutputQuantity?: number | null
+  recipeOutputUnit?: 'unit' | 'ml' | 'l' | 'g' | 'kg' | null
+  recipeItems?: RecipeItemInput[]
+}
+
+function hasCostRelevantInput(data: CostRelevantInput) {
+  const fields: Array<keyof CostRelevantInput> = [
+    'categoryId',
+    'costMode',
+    'simpleCost',
+    'stockUnit',
+    'referenceQuantity',
+    'referenceCost',
+    'unitContentQuantity',
+    'unitContentUnit',
+    'recipeOutputQuantity',
+    'recipeOutputUnit',
+    'recipeItems',
+  ]
+
+  return fields.some((field) => Object.prototype.hasOwnProperty.call(data, field))
 }
 
 async function ensureCategoryBelongsToCompany(categoryId: string, companyId: string) {
@@ -625,6 +671,22 @@ export async function createProduct(data: CreateProductInput, userId: string) {
         trackStock: created.trackStock,
       },
     })
+
+    if (hasCostRelevantInput(data)) {
+      await createProductCostHistoryEntry({
+        tx,
+        companyId: data.companyId,
+        productId: created.id,
+        source: 'product_edit',
+        reason: 'Custo inicial registrado no cadastro do produto',
+        oldProduct: null,
+        newProduct: pickProductCostHistorySnapshot(created),
+        createdByUserId: userId,
+        metadata: {
+          action: 'PRODUCT_CREATED',
+        },
+      })
+    }
 
     return created
   })
@@ -1038,6 +1100,23 @@ export async function updateProduct(
         active: updated.active,
       },
     })
+
+    if (hasCostRelevantInput(data)) {
+      await createProductCostHistoryEntry({
+        tx,
+        companyId,
+        productId,
+        source: 'product_edit',
+        reason: 'Custo alterado no cadastro do produto',
+        oldProduct: pickProductCostHistorySnapshot(existingProduct),
+        newProduct: pickProductCostHistorySnapshot(updated),
+        createdByUserId: userId,
+        metadata: {
+          action: 'PRODUCT_UPDATED',
+          changedFields: Object.keys(data),
+        },
+      })
+    }
 
     return tx.product.findUnique({
       where: {

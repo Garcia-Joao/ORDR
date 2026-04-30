@@ -37,6 +37,7 @@ model Company {
   staffEvaluationCriteria StaffEvaluationCriterion[]
   staffEvaluations        StaffEvaluation[]
   buyRequests             BuyRequest[]
+  productCostHistory      ProductCostHistory[]
 
   eventTemplates EventTemplate[]
   eventDates     EventDate[]
@@ -58,16 +59,17 @@ model User {
   role        UserRole      @default(admin)
   memberships UserCompany[]
 
-  createdOrders         Order[]         @relation("OrderCreatedBy")
-  cancelledOrders       Order[]         @relation("OrderCancelledBy")
-  createdProducts       Product[]       @relation("ProductCreatedBy")
-  updatedProducts       Product[]       @relation("ProductUpdatedBy")
-  deletedProducts       Product[]       @relation("ProductDeletedBy")
-  createdCategories     Category[]      @relation("CategoryCreatedBy")
-  updatedCategories     Category[]      @relation("CategoryUpdatedBy")
-  deletedCategories     Category[]      @relation("CategoryDeletedBy")
-  performedStockChanges StockMovement[] @relation("StockMovementPerformedBy")
-  auditLogs             AuditLog[]
+  createdOrders             Order[]              @relation("OrderCreatedBy")
+  cancelledOrders           Order[]              @relation("OrderCancelledBy")
+  createdProducts           Product[]            @relation("ProductCreatedBy")
+  updatedProducts           Product[]            @relation("ProductUpdatedBy")
+  deletedProducts           Product[]            @relation("ProductDeletedBy")
+  createdCategories         Category[]           @relation("CategoryCreatedBy")
+  updatedCategories         Category[]           @relation("CategoryUpdatedBy")
+  deletedCategories         Category[]           @relation("CategoryDeletedBy")
+  performedStockChanges     StockMovement[]      @relation("StockMovementPerformedBy")
+  auditLogs                 AuditLog[]
+  createdProductCostHistory ProductCostHistory[] @relation("ProductCostHistoryCreatedBy")
 }
 
 model UserCompany {
@@ -99,8 +101,9 @@ model Category {
   deletedByUserId String?
   deletedAt       DateTime?
 
-  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  products Product[]
+  company     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products    Product[]
+  costHistory ProductCostHistory[]
 
   createdByUser User? @relation("CategoryCreatedBy", fields: [createdByUserId], references: [id])
   updatedByUser User? @relation("CategoryUpdatedBy", fields: [updatedByUserId], references: [id])
@@ -164,6 +167,7 @@ model Product {
   orderItems                  OrderItem[]
   variationOptionRecipeUsages ProductVariationOptionRecipeItem[] @relation("VariationOptionRecipeIngredient")
   buyRequestItems             BuyRequestItem[]
+  costHistory                 ProductCostHistory[]
 
   @@index([companyId])
   @@index([categoryId])
@@ -699,6 +703,58 @@ model BuyRequestItem {
   @@index([status])
 }
 
+model ProductCostHistory {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  createdByUserId String?
+  createdByUser   User?   @relation("ProductCostHistoryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  source ProductCostHistorySource @default(manual)
+  reason String?
+
+  oldSimpleCost Decimal? @db.Decimal(10, 2)
+  newSimpleCost Decimal? @db.Decimal(10, 2)
+
+  oldReferenceCost Decimal? @db.Decimal(10, 2)
+  newReferenceCost Decimal? @db.Decimal(10, 2)
+
+  oldReferenceQuantity Decimal? @db.Decimal(10, 3)
+  newReferenceQuantity Decimal? @db.Decimal(10, 3)
+
+  oldStockUnit StockUnit?
+  newStockUnit StockUnit?
+
+  oldUnitContentQuantity Decimal? @db.Decimal(10, 3)
+  newUnitContentQuantity Decimal? @db.Decimal(10, 3)
+
+  oldUnitContentUnit StockUnit?
+  newUnitContentUnit StockUnit?
+
+  oldCostPerBaseUnit Decimal? @db.Decimal(12, 6)
+  newCostPerBaseUnit Decimal? @db.Decimal(12, 6)
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([productId])
+  @@index([categoryId])
+  @@index([createdByUserId])
+  @@index([source])
+  @@index([createdAt])
+  @@index([productId, createdAt])
+  @@index([categoryId, createdAt])
+}
+
 model Customer {
   id        String  @id @default(cuid())
   companyId String
@@ -836,6 +892,14 @@ enum PaymentMethod {
   pix
   credit
   debit
+}
+
+enum ProductCostHistorySource {
+  manual
+  buy_receive
+  product_edit
+  stock_adjustment
+  migration
 }
 
 enum ProductCostMode {

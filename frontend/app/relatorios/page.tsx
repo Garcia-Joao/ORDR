@@ -6,6 +6,8 @@ import {
   Calendar,
   Download,
   FileText,
+  History,
+  Printer,
   ChevronDown,
   CircleDollarSign,
   Filter,
@@ -51,11 +53,17 @@ import {
   type ReportsDashboard,
   type ReportsFilterOptions,
 } from '@/lib/api/reports'
+import {
+  getProductCostHistory,
+  type ProductCostHistoryResponse,
+  type ProductCostHistoryRow,
+} from '@/lib/api/product-cost-history'
 
 type DashboardModule =
   | 'overview'
   | 'sales'
   | 'products'
+  | 'costHistory'
   | 'events'
   | 'customers'
   | 'orders'
@@ -68,6 +76,7 @@ const MODULE_ACCENTS: Record<DashboardModule, { icon: string; active: string; ho
   overview: { icon: 'border-cyan-400/30 bg-cyan-500/15 text-cyan-700 dark:text-cyan-300', active: 'border-cyan-400/50 bg-cyan-500/10 shadow-cyan-500/10', hover: 'hover:border-cyan-400/40 hover:bg-cyan-500/5', badge: 'bg-cyan-500' },
   sales: { icon: 'border-emerald-400/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300', active: 'border-emerald-400/50 bg-emerald-500/10 shadow-emerald-500/10', hover: 'hover:border-emerald-400/40 hover:bg-emerald-500/5', badge: 'bg-emerald-500' },
   products: { icon: 'border-violet-400/30 bg-violet-500/15 text-violet-700 dark:text-violet-300', active: 'border-violet-400/50 bg-violet-500/10 shadow-violet-500/10', hover: 'hover:border-violet-400/40 hover:bg-violet-500/5', badge: 'bg-violet-500' },
+  costHistory: { icon: 'border-fuchsia-400/30 bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300', active: 'border-fuchsia-400/50 bg-fuchsia-500/10 shadow-fuchsia-500/10', hover: 'hover:border-fuchsia-400/40 hover:bg-fuchsia-500/5', badge: 'bg-fuchsia-500' },
   events: { icon: 'border-amber-400/30 bg-amber-500/15 text-amber-700 dark:text-amber-300', active: 'border-amber-400/50 bg-amber-500/10 shadow-amber-500/10', hover: 'hover:border-amber-400/40 hover:bg-amber-500/5', badge: 'bg-amber-500' },
   customers: { icon: 'border-rose-400/30 bg-rose-500/15 text-rose-700 dark:text-rose-300', active: 'border-rose-400/50 bg-rose-500/10 shadow-rose-500/10', hover: 'hover:border-rose-400/40 hover:bg-rose-500/5', badge: 'bg-rose-500' },
   orders: { icon: 'border-slate-400/30 bg-slate-500/15 text-slate-700 dark:text-slate-200', active: 'border-slate-400/50 bg-slate-500/10 shadow-slate-500/10', hover: 'hover:border-slate-400/40 hover:bg-slate-500/5', badge: 'bg-slate-500' },
@@ -111,6 +120,12 @@ const modules: Array<{
     title: 'Produtos',
     description: 'Ranking de receita, custo, lucro e margem.',
     icon: <Package className="h-4 w-4" />,
+  },
+  {
+    id: 'costHistory',
+    title: 'Histórico de custos',
+    description: 'Evolução de custo por produto e categoria.',
+    icon: <History className="h-4 w-4" />,
   },
   {
     id: 'events',
@@ -225,6 +240,26 @@ function getKpiTone(value: number): KpiTone {
   return 'muted'
 }
 
+function formatCostPerUnit(value: number | string | null | undefined, unit?: string | null) {
+  const numericValue = Number(value ?? 0)
+  const unitLabel = unit && unit !== 'unit' ? unit : 'un.'
+
+  return `${formatBRL(numericValue)} / ${unitLabel}`
+}
+
+function getCostDeltaClass(value?: number | null) {
+  if (value == null) return 'text-muted-foreground'
+  if (value > 0) return 'text-rose-500'
+  if (value < 0) return 'text-emerald-500'
+  return 'text-muted-foreground'
+}
+
+function getCostDeltaLabel(value?: number | null) {
+  if (value == null) return '-'
+  const sign = value > 0 ? '+' : ''
+  return `${sign}${formatBRL(value)}`
+}
+
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
 
@@ -268,6 +303,7 @@ export default function RelatoriosPage() {
     overview: true,
     sales: true,
     products: true,
+    costHistory: false,
     events: true,
     customers: true,
     orders: false,
@@ -342,7 +378,7 @@ export default function RelatoriosPage() {
   }
 
   function setAllExportModules(value: boolean) {
-    setExportModules({ overview: value, sales: value, products: value, events: value, customers: value, orders: value })
+    setExportModules({ overview: value, sales: value, products: value, costHistory: value, events: value, customers: value, orders: value })
   }
 
   function handleExportPdf() {
@@ -555,6 +591,12 @@ export default function RelatoriosPage() {
           {activeModule === 'overview' && <OverviewModule dashboard={dashboard} onDayClick={setSelectedDayDate} />}
           {activeModule === 'sales' && <SalesModule dashboard={dashboard} />}
           {activeModule === 'products' && <ProductsModule dashboard={dashboard} rows={filteredProducts} />}
+          {activeModule === 'costHistory' && (
+            <CostHistoryModule
+              filters={filters}
+              options={filterOptions}
+            />
+          )}
           {activeModule === 'events' && (
             <EventsModule
               dashboard={dashboard}
@@ -1058,6 +1100,285 @@ function VariationRankingList({ rows }: { rows: NonNullable<ProductReportRow['va
       })}
     </div>
   )
+}
+
+function CostHistoryModule({
+  filters,
+  options,
+}: {
+  filters: ReportFilters
+  options: ReportsFilterOptions | null
+}) {
+  const [history, setHistory] = useState<ProductCostHistoryResponse | null>(null)
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [selectedProductId, setSelectedProductId] = useState(filters.productId ?? 'all')
+  const [selectedCategoryId, setSelectedCategoryId] = useState(filters.categoryId ?? 'all')
+  const [fromDate, setFromDate] = useState(filters.fromDate ?? '')
+  const [toDate, setToDate] = useState(filters.toDate ?? '')
+  const [expandedProductId, setExpandedProductId] = useState<string | null>(null)
+
+  async function loadHistory() {
+    try {
+      setIsLoadingHistory(true)
+      const data = await getProductCostHistory({
+        fromDate,
+        toDate,
+        productId: selectedProductId,
+        categoryId: selectedCategoryId,
+      })
+      setHistory(data)
+    } catch (error: any) {
+      console.error('Erro ao carregar histórico de custos:', error)
+      alert(error?.message || 'Erro ao carregar histórico de custos.')
+    } finally {
+      setIsLoadingHistory(false)
+    }
+  }
+
+  useEffect(() => {
+    loadHistory()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const safeHistoryRows = history?.rows ?? []
+  const safeHistoryByProduct = history?.byProduct ?? []
+  const safeHistoryByCategory = history?.byCategory ?? []
+
+  const chartRows = useMemo(() => {
+    if (!history) return []
+
+    if (selectedProductId && selectedProductId !== 'all') {
+      return safeHistoryRows.map((row) => ({
+        label: formatDate(row.createdAt),
+        productName: row.productName,
+        effectiveCost: Number(row.effectiveCost ?? 0),
+        deltaCost: Number(row.deltaCost ?? 0),
+        effectiveUnit: row.effectiveUnit ?? 'unit',
+      }))
+    }
+
+    return safeHistoryByProduct.map((row) => ({
+      label: row.productName,
+      productName: row.productName,
+      effectiveCost: Number(row.lastCost ?? 0),
+      deltaCost: Number(row.deltaCost ?? 0),
+      effectiveUnit: row.history?.[row.history.length - 1]?.effectiveUnit ?? 'unit',
+    }))
+  }, [history, selectedProductId])
+
+  function printRows(rows: ProductCostHistoryRow[], title = 'Histórico de custos') {
+    const popup = window.open('', '_blank', 'width=1100,height=850')
+    if (!popup) {
+      alert('Não foi possível abrir a janela de impressão. Verifique o bloqueador de pop-ups.')
+      return
+    }
+
+    popup.document.open()
+    popup.document.write(buildCostHistoryPrintHtml(title, rows, fromDate, toDate))
+    popup.document.close()
+    popup.focus()
+  }
+
+  return (
+    <div className="space-y-6">
+      <ModuleHeader
+        title="Histórico de custos"
+        description="Veja como o custo dos produtos mudou com compras, ajustes e alterações de cadastro."
+        icon={<History className="h-5 w-5" />}
+      />
+
+      <section className="rounded-2xl border border-border bg-card p-5">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[150px_150px_1fr_1fr_auto_auto]">
+          <DateFilter label="De" value={fromDate} onChange={setFromDate} />
+          <DateFilter label="Até" value={toDate} onChange={setToDate} />
+
+          <SelectFilter label="Categoria" value={selectedCategoryId} onChange={(value) => {
+            setSelectedCategoryId(value)
+            setSelectedProductId('all')
+          }}>
+            <option value="all">Todas</option>
+            {(options?.categories ?? []).map((category) => (
+              <option key={category.id} value={category.id}>{category.name}</option>
+            ))}
+          </SelectFilter>
+
+          <SelectFilter label="Produto" value={selectedProductId} onChange={setSelectedProductId}>
+            <option value="all">Todos</option>
+            {(options?.products ?? [])
+              .filter((product) => selectedCategoryId === 'all' || product.categoryId === selectedCategoryId)
+              .map((product) => (
+                <option key={product.id} value={product.id}>{product.name}</option>
+              ))}
+          </SelectFilter>
+
+          <button
+            type="button"
+            onClick={loadHistory}
+            disabled={isLoadingHistory}
+            className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            <RefreshCcw className={`h-4 w-4 ${isLoadingHistory ? 'animate-spin' : ''}`} />
+            Atualizar
+          </button>
+
+          <button
+            type="button"
+            onClick={() => printRows(safeHistoryRows)}
+            disabled={safeHistoryRows.length === 0}
+            className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold hover:bg-secondary disabled:opacity-50"
+          >
+            <Printer className="h-4 w-4" />
+            Imprimir
+          </button>
+        </div>
+      </section>
+
+      {isLoadingHistory && !history ? (
+        <div className="flex h-64 items-center justify-center rounded-2xl border border-border bg-card text-muted-foreground">
+          <RefreshCcw className="mr-2 h-4 w-4 animate-spin" />
+          Carregando histórico de custos...
+        </div>
+      ) : !history || safeHistoryRows.length === 0 ? (
+        <EmptyState message="Nenhum histórico de custo encontrado para os filtros atuais." />
+      ) : (
+        <>
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard title="Mudanças" value={formatNumber(history.summary.totalChanges)} detail={`${(history.summary.productCount ?? history.byProduct?.length ?? 0)} produtos monitorados`} icon={<History className="h-5 w-5" />} tone="primary" />
+            <KpiCard title="Aumentos" value={formatNumber((history.summary.increased ?? 0))} detail="Alterações com custo maior" icon={<TrendingUp className="h-5 w-5" />} tone="destructive" />
+            <KpiCard title="Reduções" value={formatNumber((history.summary.decreased ?? 0))} detail="Alterações com custo menor" icon={<TrendingUp className="h-5 w-5 rotate-180" />} tone="success" />
+            <KpiCard title="Maior variação" value={history.summary.mostChangedProduct?.productName ?? '-'} detail={history.summary.mostChangedProduct ? `${formatPercent(history.summary.mostChangedProduct.deltaPercent ?? 0)} • ${getCostDeltaLabel(history.summary.mostChangedProduct.deltaCost)}` : 'Sem comparação'} icon={<Sparkles className="h-5 w-5" />} tone="warning" />
+          </section>
+
+          <section className="grid gap-6 xl:grid-cols-[1.35fr_.65fr]">
+            <ChartCard title={selectedProductId === 'all' ? 'Último custo por produto' : 'Evolução do custo'} description="Custo efetivo normalizado por unidade base: ml, g ou unidade.">
+              <ResponsiveContainer width="100%" height={360}>
+                <ComposedChart data={chartRows}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                  <XAxis dataKey="label" />
+                  <YAxis tickFormatter={(value) => formatBRL(Number(value))} />
+                  <Tooltip content={({ active, payload }: any) => {
+                    if (!active || !payload?.length) return null
+                    const row = payload[0].payload
+                    return (
+                      <div className="rounded-xl border border-border bg-popover p-3 text-xs shadow-xl">
+                        <p className="font-semibold text-foreground">{row.productName}</p>
+                        <p className="mt-1 text-foreground">Custo: <strong>{formatCostPerUnit(row.effectiveCost, row.effectiveUnit)}</strong></p>
+                        <p className={getCostDeltaClass(row.deltaCost)}>Variação: {getCostDeltaLabel(row.deltaCost)}</p>
+                      </div>
+                    )
+                  }} />
+                  <Bar dataKey="effectiveCost" name="Custo efetivo" fill="#a855f7" radius={[8, 8, 0, 0]} />
+                  {selectedProductId !== 'all' && <Line dataKey="effectiveCost" name="Linha de custo" stroke="#06b6d4" strokeWidth={3} dot />}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            <ChartCard title="Categorias" description="Categorias com mais mudanças de custo.">
+              <RankingList
+                rows={safeHistoryByCategory.slice(0, 10)}
+                getKey={(row) => row.categoryId ?? 'uncategorized'}
+                getTitle={(row) => row.categoryName}
+                getSubtitle={(row) => `${row.productCount} produtos • ${row.changes} mudanças`}
+                getValue={(row) => formatCostPerUnit(row.averageCost, 'unit')}
+                getBarValue={(row) => row.changes}
+              />
+            </ChartCard>
+          </section>
+
+          <SectionCard title="Produtos com histórico" description="Clique para expandir e imprimir um produto específico.">
+            <div className="space-y-3">
+              {safeHistoryByProduct.map((product) => {
+                const expanded = expandedProductId === product.productId
+                const unit = product.history[product.history.length - 1]?.effectiveUnit ?? 'unit'
+                return (
+                  <div key={product.productId} className="rounded-2xl border border-border bg-background p-4">
+                    <button type="button" onClick={() => setExpandedProductId(expanded ? null : product.productId)} className="flex w-full items-start justify-between gap-3 text-left">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-foreground">{product.productName}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{product.categoryName} • {product.changes} mudanças • último em {formatDateTime(product.lastChangedAt)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-foreground">{formatCostPerUnit(product.lastCost, unit)}</p>
+                        <p className={`text-xs font-semibold ${getCostDeltaClass(product.deltaCost)}`}>{getCostDeltaLabel(product.deltaCost)} • {formatPercent(product.deltaPercent ?? 0)}</p>
+                      </div>
+                    </button>
+                    {expanded && (
+                      <div className="mt-4">
+                        <button type="button" onClick={() => printRows(product.history, `Histórico de custo • ${product.productName}`)} className="mb-3 inline-flex h-9 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-semibold hover:bg-secondary">
+                          <Printer className="h-3.5 w-3.5" />
+                          Imprimir este produto
+                        </button>
+                        <CostHistoryRowsTable rows={product.history} compact />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Lista detalhada de alterações" description="Todos os registros capturados pelo histórico.">
+            <CostHistoryRowsTable rows={safeHistoryRows} />
+          </SectionCard>
+        </>
+      )}
+    </div>
+  )
+}
+
+function CostHistoryRowsTable({ rows, compact = false }: { rows: ProductCostHistoryRow[]; compact?: boolean }) {
+  if (!rows.length) return <EmptyState message="Nenhuma alteração encontrada." />
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-border bg-background">
+      <table className="w-full min-w-[920px] text-sm">
+        <thead>
+          <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <th className="px-3 py-3">Data</th>
+            {!compact && <th className="px-3 py-3">Produto</th>}
+            <th className="px-3 py-3">Categoria</th>
+            <th className="px-3 py-3">Fonte</th>
+            <th className="px-3 py-3 text-right">Anterior</th>
+            <th className="px-3 py-3 text-right">Novo</th>
+            <th className="px-3 py-3 text-right">Variação</th>
+            <th className="px-3 py-3">Configuração</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id} className="border-b border-border/70 last:border-0">
+              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.createdAt)}</td>
+              {!compact && <td className="px-3 py-3 font-medium text-foreground">{row.productName}</td>}
+              <td className="px-3 py-3 text-muted-foreground">{row.categoryName}</td>
+              <td className="px-3 py-3 text-muted-foreground">{row.source}</td>
+              <td className="px-3 py-3 text-right">{row.oldEffectiveCost == null ? '-' : formatCostPerUnit(row.oldEffectiveCost, row.effectiveUnit)}</td>
+              <td className="px-3 py-3 text-right font-semibold text-foreground">{formatCostPerUnit(row.effectiveCost, row.effectiveUnit)}</td>
+              <td className={`px-3 py-3 text-right font-semibold ${getCostDeltaClass(row.deltaCost)}`}>{getCostDeltaLabel(row.deltaCost)}</td>
+              <td className="px-3 py-3 text-xs text-muted-foreground">
+                {row.referenceCost && row.referenceQuantity ? `Referência: ${formatBRL(row.referenceCost)} / ${formatNumber(row.referenceQuantity, 3)} ${row.stockUnit ?? row.effectiveUnit}` : row.simpleCost ? `Simples: ${formatBRL(row.simpleCost)}` : row.costMode}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function buildCostHistoryPrintHtml(title: string, rows: ProductCostHistoryRow[], fromDate?: string, toDate?: string) {
+  const generatedAt = new Date().toLocaleString('pt-BR')
+  const period = (fromDate || toDate) ? `${fromDate ? formatDate(fromDate) : 'Início'} → ${toDate ? formatDate(toDate) : 'Hoje'}` : 'Todos os dados'
+  const maxValue = Math.max(1, ...rows.map((row) => Math.max(0, row.effectiveCost)))
+  const chartBars = rows.slice(-28).map((row, index) => {
+    const height = Math.max(4, (row.effectiveCost / maxValue) * 150)
+    const x = 50 + index * 28
+    const y = 190 - height
+    const color = row.deltaCost == null ? '#8b5cf6' : row.deltaCost > 0 ? '#f43f5e' : row.deltaCost < 0 ? '#10b981' : '#06b6d4'
+    return `<g><rect x="${x}" y="${y}" width="18" height="${height}" rx="7" fill="${color}"/><text x="${x + 9}" y="214" text-anchor="middle" font-size="8" fill="#64748b">${escapeHtml(formatDate(row.createdAt).slice(0, 5))}</text></g>`
+  }).join('')
+  const table = rows.map((row) => `<tr><td>${escapeHtml(formatDateTime(row.createdAt))}</td><td>${escapeHtml(row.productName)}</td><td>${escapeHtml(row.categoryName)}</td><td>${escapeHtml(row.source)}</td><td>${row.oldEffectiveCost == null ? '-' : escapeHtml(formatCostPerUnit(row.oldEffectiveCost, row.effectiveUnit))}</td><td>${escapeHtml(formatCostPerUnit(row.effectiveCost, row.effectiveUnit))}</td><td>${escapeHtml(getCostDeltaLabel(row.deltaCost))}</td></tr>`).join('')
+
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"/><title>${escapeHtml(title)}</title><style>*{box-sizing:border-box}body{margin:0;background:#f8fafc;color:#0f172a;font-family:Inter,Arial,sans-serif}.page{padding:34px}.hero{border-radius:28px;padding:28px;color:white;background:linear-gradient(135deg,#7c3aed,#0891b2 52%,#059669);box-shadow:0 18px 60px rgba(15,23,42,.18)}.eyebrow{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.14em;opacity:.86}h1{margin:0;font-size:30px}.meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}.pill{border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:7px 11px;background:rgba(255,255,255,.14);font-size:12px}.section{margin-top:22px;border:1px solid #e2e8f0;border-radius:24px;background:white;padding:22px;box-shadow:0 10px 28px rgba(15,23,42,.06)}.chart{border:1px solid #e2e8f0;border-radius:20px;background:#fff;padding:14px}table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid #e2e8f0;padding:9px 8px}td{border-bottom:1px solid #eef2f7;padding:9px 8px;vertical-align:top}@media print{body{background:white}.page{padding:0}.section{box-shadow:none}}</style></head><body><div class="page"><section class="hero"><p class="eyebrow">ORDR • Histórico de custos</p><h1>${escapeHtml(title)}</h1><div class="meta"><span class="pill">Período: ${escapeHtml(period)}</span><span class="pill">Gerado em: ${escapeHtml(generatedAt)}</span></div></section><section class="section"><h2>Gráfico de custo efetivo</h2><div class="chart"><svg viewBox="0 0 900 245"><rect width="900" height="245" rx="20" fill="#f8fafc"/><line x1="40" x2="860" y1="190" y2="190" stroke="#cbd5e1"/>${chartBars}</svg></div></section><section class="section"><h2>Lista de alterações</h2><table><thead><tr><th>Data</th><th>Produto</th><th>Categoria</th><th>Fonte</th><th>Anterior</th><th>Novo</th><th>Variação</th></tr></thead><tbody>${table || '<tr><td colspan="7">Sem registros.</td></tr>'}</tbody></table></section></div><script>window.addEventListener('load',()=>{setTimeout(()=>window.print(),350)})</script></body></html>`
 }
 
 function EventsModule({
@@ -2139,6 +2460,10 @@ function buildReportPdfHtml(dashboard: ReportsDashboard, filters: ReportFilters,
       <h3>Variações por produto</h3><table><thead><tr><th>Produto</th><th>Grupo</th><th>Opção</th><th>Qtd.</th><th>Frequência</th><th>Receita var.</th><th>Custo</th><th>Lucro</th></tr></thead><tbody>
       ${tableRows((dashboard.charts.productVariations ?? []).slice(0, 18).map((row) => `<tr><td>${escapeHtml(row.productName)}</td><td>${escapeHtml(row.variationGroupName)}</td><td>${escapeHtml(row.optionName)}</td><td>${formatNumber(row.quantity)}</td><td>${formatPercent(row.attachRatePercent)}</td><td>${formatBRL(row.revenueModifier)}</td><td>${formatBRL(row.cost)}</td><td>${formatBRL(row.profit)}</td></tr>`).join(''), 8)}
     </tbody></table></section>`)
+  }
+
+  if (selected.has('costHistory')) {
+    sections.push(`<section class="section"><h2>Histórico de custos</h2><p class="muted">O histórico de custos usa filtros próprios por produto/categoria e pode ser impresso diretamente no módulo Histórico de custos, com gráfico e lista detalhada.</p></section>`)
   }
 
   if (selected.has('events')) {

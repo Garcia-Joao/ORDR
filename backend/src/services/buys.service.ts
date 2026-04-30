@@ -3,6 +3,7 @@ import path from 'path'
 import { BuyRequestItemStatus, BuyRequestStatus, Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import { getSelectedOrderPrinterName } from './printers.service'
+import { createProductCostHistoryEntry } from './product-cost-history.service'
 
 const { printRawThermalText } = require('../../printer.js')
 
@@ -178,14 +179,52 @@ async function updateStockAndCostForBoughtItem(params: {
         ? params.totalPaid / params.boughtQuantity
         : previousUnitCost
 
+  const directPurchaseUnitCost =
+    params.boughtQuantity > 0 ? params.totalPaid / params.boughtQuantity : 0
+
   await params.tx.product.update({
     where: { id: product.id },
     data: {
       trackStock: true,
       stockQuantity: newQty,
+
+      // Keep the product cost as weighted average for inventory/profit estimates.
       simpleCost: new Prisma.Decimal(newUnitCost),
       referenceQuantity: new Prisma.Decimal(1),
       referenceCost: new Prisma.Decimal(newUnitCost),
+    },
+  })
+
+  const directPurchaseCostSnapshot = {
+    ...product,
+
+    // Save the exact price paid in this buy request to history.
+    // Example:
+    // boughtQuantity = 2, totalPaid = 30
+    // ProductCostHistory will store referenceCost = 30 and referenceQuantity = 2,
+    // so the chart shows R$15/unit for this purchase, not the weighted average.
+    simpleCost: new Prisma.Decimal(directPurchaseUnitCost),
+    referenceQuantity: new Prisma.Decimal(params.boughtQuantity),
+    referenceCost: new Prisma.Decimal(params.totalPaid),
+  }
+
+  await createProductCostHistoryEntry({
+    tx: params.tx,
+    companyId: params.companyId,
+    productId: product.id,
+    source: 'buy_receive',
+    reason: `Preço pago ao receber compra ${params.buyRequestId}`,
+    oldProduct: product,
+    newProduct: directPurchaseCostSnapshot,
+    metadata: {
+      buyRequestId: params.buyRequestId,
+      boughtQuantity: params.boughtQuantity,
+      totalPaid: params.totalPaid,
+      directPurchaseUnitCost,
+      previousQty,
+      newQty,
+      previousUnitCost,
+      weightedAverageUnitCost: newUnitCost,
     },
   })
 
