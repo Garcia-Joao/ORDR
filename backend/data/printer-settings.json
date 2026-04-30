@@ -1,15 +1,5 @@
 {
-  "printers": [
-    {
-      "id": "c9oz1rmr",
-      "name": "Tickets",
-      "systemName": "Generic / Text Only",
-      "driverName": "Generic / Text Only",
-      "portName": "USB001",
-      "paperWidth": 80,
-      "type": "orders"
-    }
-  ],
+  "printers": [],
   "orderPrinterId": "c9oz1rmr",
   "orderTicketTemplate": {
     "showLogo": true,
