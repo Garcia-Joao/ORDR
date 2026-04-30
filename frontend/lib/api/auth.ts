@@ -5,12 +5,22 @@ export type AuthCompany = {
   name: string
   isTest: boolean
   role: string
+  systemRole?: 'ADMIN' | 'CUSTOM'
+  customRoleId?: string | null
+  customRoleName?: string | null
+  activeEventDateId?: string | null
+  permissions?: string[]
 }
 
 export type AuthUser = {
   id: string
   username: string
   role: string
+  systemRole?: 'ADMIN' | 'CUSTOM'
+  customRoleId?: string | null
+  customRoleName?: string | null
+  activeEventDateId?: string | null
+  permissions?: string[]
   companyId: string
   companies?: AuthCompany[]
   name?: string | null

@@ -570,7 +570,7 @@ export async function getProductCostHistory(
       decreases: history.filter((item) => (item.delta ?? 0) < 0).length,
     },
     chart,
-    history,
+    history: [...history].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     products: Array.from(productMap.values()).map((item) => ({
       ...item,
       firstCost: item.firstCost == null ? null : round(item.firstCost),
@@ -613,6 +613,7 @@ export async function createProductCostHistoryEntry(params: {
     unitContentQuantity?: Prisma.Decimal | number | string | null
     unitContentUnit?: StockUnit | null
     categoryId?: string | null
+    categoryName?: string | null
   } | null
   newProduct?: {
     simpleCost?: Prisma.Decimal | number | string | null
@@ -622,6 +623,7 @@ export async function createProductCostHistoryEntry(params: {
     unitContentQuantity?: Prisma.Decimal | number | string | null
     unitContentUnit?: StockUnit | null
     categoryId?: string | null
+    categoryName?: string | null
   } | null
 }) {
   const client = params.tx ?? prisma

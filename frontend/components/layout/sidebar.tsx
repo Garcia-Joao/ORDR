@@ -18,19 +18,24 @@ import {
   Boxes,
   Moon,
   Sun,
-  Sparkles,
   LayoutDashboard,
   SlidersHorizontal,
   UserRoundCog,
   CalendarDays,
+  ShieldCheck,
+  FileClock,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { canAny, getStoredUser } from '@/lib/permissions'
+import { OrdrFullLogo, OrdrIcon } from '@/components/brand/ordr-brand'
+import type { AuthUser } from '@/lib/api/auth'
 
 type NavItem = {
   href: string
   icon: React.ElementType
   label: string
   description: string
+  requiredPermissions?: string[]
 }
 
 type NavGroup = {
@@ -51,24 +56,28 @@ const navGroups: NavGroup[] = [
         icon: ShoppingCart,
         label: 'PDV',
         description: 'Ponto de venda principal',
+        requiredPermissions: ['pdv.view', 'orders.create'],
       },
       {
-        href: '/Interno',
+        href: '/interno',
         icon: HandCoins,
         label: 'PDV Interno',
         description: 'Contas internas do dia',
+        requiredPermissions: ['interno.view'],
       },
       {
         href: '/pedidos',
         icon: ClipboardList,
         label: 'Pedidos',
         description: 'Pedidos e cancelamentos',
+        requiredPermissions: ['orders.view'],
       },
       {
         href: '/clientes',
         icon: Users,
         label: 'Clientes',
         description: 'Cadastro de clientes',
+        requiredPermissions: ['customers.view'],
       },
     ],
   },
@@ -82,36 +91,42 @@ const navGroups: NavGroup[] = [
         icon: Package,
         label: 'Produtos',
         description: 'Cardápio e preços',
+        requiredPermissions: ['products.view'],
       },
       {
         href: '/estoque',
         icon: Boxes,
         label: 'Estoque',
         description: 'Receitas, custos e produção',
+        requiredPermissions: ['stock.view'],
       },
       {
         href: '/compras',
         icon: ShoppingCart,
         label: 'Compras',
         description: 'Pedidos de compra e recebimento',
+        requiredPermissions: ['buys.view', 'buys.manage', 'stock.quickBuy', 'stock.purchase.create'],
       },
       {
         href: '/pessoas',
         icon: UserRoundCog,
         label: 'Pessoas',
         description: 'Equipe, músicos e freelancers',
+        requiredPermissions: ['people.view'],
       },
       {
         href: '/eventos',
         icon: CalendarDays,
         label: 'Eventos',
         description: 'Agenda e equipe de eventos',
+        requiredPermissions: ['events.view'],
       },
       {
         href: '/relatorios',
         icon: BarChart3,
         label: 'Relatórios',
         description: 'Vendas e análises',
+        requiredPermissions: ['reports.view'],
       },
     ],
   },
@@ -125,18 +140,35 @@ const navGroups: NavGroup[] = [
         icon: Printer,
         label: 'Impressoras',
         description: 'Tickets e térmicas',
+        requiredPermissions: ['printers.view'],
       },
       {
         href: '/dispositivos',
         icon: Monitor,
         label: 'Dispositivos',
         description: 'Terminais e acessos',
+        requiredPermissions: ['settings.view'],
+      },
+      {
+        href: '/acessos',
+        icon: ShieldCheck,
+        label: 'Acessos',
+        description: 'Cargos e permissões',
+        requiredPermissions: ['roles.view', 'roles.manage', 'users.view', 'users.manage'],
+      },
+      {
+        href: '/auditoria',
+        icon: FileClock,
+        label: 'Auditoria',
+        description: 'Histórico de alterações',
+        requiredPermissions: ['audit.view'],
       },
       {
         href: '/configuracoes',
         icon: Settings,
         label: 'Configurações',
         description: 'Ajustes do sistema',
+        requiredPermissions: ['settings.view'],
       },
     ],
   },
@@ -163,11 +195,28 @@ function getInitialOpenGroups(pathname: string) {
 export function Sidebar() {
   const pathname = usePathname()
 
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('dark')
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
     getInitialOpenGroups(pathname)
   )
+
+  useEffect(() => {
+    setCurrentUser(getStoredUser())
+
+    function handleStorage() {
+      setCurrentUser(getStoredUser())
+    }
+
+    window.addEventListener('storage', handleStorage)
+    window.addEventListener('ordr-user-updated', handleStorage)
+
+    return () => {
+      window.removeEventListener('storage', handleStorage)
+      window.removeEventListener('ordr-user-updated', handleStorage)
+    }
+  }, [])
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('ordr-theme') as 'light' | 'dark' | null
@@ -180,11 +229,22 @@ export function Sidebar() {
     document.documentElement.classList.toggle('dark', initialTheme === 'dark')
   }, [])
 
+  const visibleNavGroups = useMemo(() => {
+    return navGroups
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) =>
+          canAny(currentUser, item.requiredPermissions ?? [])
+        ),
+      }))
+      .filter((group) => group.items.length > 0)
+  }, [currentUser])
+
   useEffect(() => {
     setOpenGroups((current) => {
       const next = { ...current }
 
-      for (const group of navGroups) {
+      for (const group of visibleNavGroups) {
         const hasActiveItem = group.items.some((item) =>
           isRouteActive(pathname, item.href)
         )
@@ -196,7 +256,7 @@ export function Sidebar() {
 
       return next
     })
-  }, [pathname])
+  }, [pathname, visibleNavGroups])
 
   function toggleTheme() {
     setTheme((current) => {
@@ -217,12 +277,12 @@ export function Sidebar() {
   }
 
   const activeGroupTitle = useMemo(() => {
-    const group = navGroups.find((navGroup) =>
+    const group = visibleNavGroups.find((navGroup) =>
       navGroup.items.some((item) => isRouteActive(pathname, item.href))
     )
 
     return group?.title ?? null
-  }, [pathname])
+  }, [pathname, visibleNavGroups])
 
   return (
     <aside
@@ -242,27 +302,12 @@ export function Sidebar() {
             className={`flex min-w-0 items-center gap-3 transition-all duration-300 ${collapsed ? 'justify-center' : ''
               }`}
           >
-            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-sidebar-primary text-sidebar-primary-foreground shadow-sm transition-transform duration-300 hover:scale-105">
-              <span className="text-lg font-black">O</span>
-
-              {!collapsed && (
-                <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-background shadow-sm">
-                  <Sparkles className="h-3 w-3 text-sidebar-primary" />
-                </span>
-              )}
-            </div>
-
-            {!collapsed && (
+            {collapsed ? (
+              <OrdrIcon size="sm" rotateOnHover ariaLabel="ORDR" />
+            ) : (
               <div className="min-w-0 animate-in fade-in slide-in-from-left-2 duration-300">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-xl font-black tracking-tight text-sidebar-primary">
-                    Ordr
-                  </span>
-                  <span className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-semibold text-sidebar-foreground/60">
-                    POS
-                  </span>
-                </div>
-                <p className="truncate text-xs text-sidebar-foreground/55">
+                <OrdrFullLogo className="h-12 w-auto max-w-[150px]" textClassName="text-sidebar-foreground" />
+                <p className="mt-1 truncate text-xs text-sidebar-foreground/55">
                   Bar, eventos e comandas
                 </p>
               </div>
@@ -310,7 +355,7 @@ export function Sidebar() {
 
       <nav className="relative flex-1 overflow-y-auto px-2 py-4">
         <div className="space-y-3">
-          {navGroups.map((group) => {
+          {visibleNavGroups.map((group) => {
             const GroupIcon = group.icon
             const isOpen = collapsed || openGroups[group.id]
             const hasActiveItem = group.items.some((item) =>

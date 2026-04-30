@@ -28,6 +28,7 @@ model Company {
   orders                  Order[]
   products                Product[]
   memberships             UserCompany[]
+  accessRoles             Role[]
   internalCustomers       InternalCustomer[]
   salesEnvironments       SalesEnvironment[]
   stockMovements          StockMovement[]
@@ -73,18 +74,60 @@ model User {
 }
 
 model UserCompany {
-  id        String   @id @default(cuid())
+  id        String @id @default(cuid())
   userId    String
   companyId String
-  role      UserRole @default(admin)
-  createdAt DateTime @default(now())
 
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // Legacy role kept for old code/data compatibility. New access control uses systemRole + customRole.
+  role              UserRole   @default(admin)
+  systemRole        SystemRole @default(ADMIN)
+  customRoleId      String?
+  activeEventDateId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company         Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customRole      Role?      @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  activeEventDate EventDate? @relation("UserCompanyActiveEventDate", fields: [activeEventDateId], references: [id], onDelete: SetNull)
 
   @@unique([userId, companyId])
   @@index([userId])
   @@index([companyId])
+  @@index([systemRole])
+  @@index([customRoleId])
+  @@index([activeEventDateId])
+}
+
+model Role {
+  id          String  @id @default(cuid())
+  companyId   String
+  name        String
+  description String?
+  active      Boolean @default(true)
+
+  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  memberships UserCompany[]
+  permissions RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@index([active])
+}
+
+model RolePermission {
+  id            String @id @default(cuid())
+  roleId        String
+  permissionKey String
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionKey])
+  @@index([permissionKey])
 }
 
 model Category {
@@ -605,11 +648,12 @@ model EventDate {
   expectedAudience Int?
   status           EventDateStatus @default(scheduled)
 
-  people           EventDatePerson[]
-  orders           Order[]
-  customerComandas EventCustomerComanda[]
-  staffEvaluations StaffEvaluation[]
-  buyRequests      BuyRequest[]
+  people                 EventDatePerson[]
+  orders                 Order[]
+  customerComandas       EventCustomerComanda[]
+  staffEvaluations       StaffEvaluation[]
+  buyRequests            BuyRequest[]
+  activeEventMemberships UserCompany[]          @relation("UserCompanyActiveEventDate")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -868,6 +912,11 @@ model StaffEvaluationScore {
   @@unique([evaluationId, criterionId])
   @@index([evaluationId])
   @@index([criterionId])
+}
+
+enum SystemRole {
+  ADMIN
+  CUSTOM
 }
 
 enum UserRole {

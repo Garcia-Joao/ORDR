@@ -30,6 +30,8 @@ import {
 } from '@/lib/api/customers'
 import { getEventDates, type EventDate } from '@/lib/api/events'
 import { getActiveEventDate } from '@/lib/events/active-events'
+import { canAny, getStoredUser } from '@/lib/permissions'
+import type { AuthUser } from '@/lib/api/auth'
 
 function formatEventLabel(eventDate: EventDate) {
   const start = new Date(eventDate.startAt)
@@ -59,40 +61,81 @@ function formatCurrency(value: number | string | null | undefined) {
 export default function ClientesPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [hasCheckedAccess, setHasCheckedAccess] = useState(false)
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [events, setEvents] = useState<EventDate[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
 
+  const canViewCustomers = canAny(authUser, ['customers.view'])
+  const canCreateCustomer = canAny(authUser, ['customers.create'])
+  const canUpdateCustomer = canAny(authUser, ['customers.update'])
+  const canDeleteCustomer = canAny(authUser, ['customers.delete'])
+  const canUseEventComandas = canAny(authUser, ['customers.eventComanda.manage', 'events.manage'])
+  const canViewEvents = canAny(authUser, ['events.view', 'events.manage', 'events.active.select', 'customers.eventComanda.manage', 'pdv.view', 'orders.create'])
+
   async function loadData() {
+    if (!canViewCustomers) {
+      setCustomers([])
+      setEvents([])
+      return
+    }
+
     const activeEvent = getActiveEventDate()
 
     const today = new Date()
     const from = new Date(today.getFullYear(), today.getMonth() - 1, 1)
     const to = new Date(today.getFullYear(), today.getMonth() + 2, 0)
 
-    const [customersData, eventsData] = await Promise.all([
-      getCustomers(),
-      getEventDates({
+    const customersData = await getCustomers()
+    setCustomers(customersData)
+
+    if (!canViewEvents) {
+      setEvents([])
+      return
+    }
+
+    try {
+      const eventsData = await getEventDates({
         from: from.toISOString().slice(0, 10),
         to: to.toISOString().slice(0, 10),
         status: 'all',
-      }),
-    ])
+      })
 
-    setCustomers(customersData)
+      const sortedEvents = [...eventsData].sort((a, b) => {
+        if (activeEvent?.id === a.id) return -1
+        if (activeEvent?.id === b.id) return 1
+        return new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
+      })
 
-    const sortedEvents = [...eventsData].sort((a, b) => {
-      if (activeEvent?.id === a.id) return -1
-      if (activeEvent?.id === b.id) return 1
-      return new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
-    })
-
-    setEvents(sortedEvents)
+      setEvents(sortedEvents)
+    } catch (error) {
+      console.warn('Eventos ocultos para este usuário ou indisponíveis:', error)
+      setEvents([])
+    }
   }
 
   useEffect(() => {
+    function syncStoredUser() {
+      setAuthUser(getStoredUser())
+      setHasCheckedAccess(true)
+    }
+
+    syncStoredUser()
+    window.addEventListener('storage', syncStoredUser)
+    window.addEventListener('ordr-user-updated', syncStoredUser)
+
+    return () => {
+      window.removeEventListener('storage', syncStoredUser)
+      window.removeEventListener('ordr-user-updated', syncStoredUser)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!hasCheckedAccess) return
+
     async function init() {
       try {
         setIsLoading(true)
@@ -105,7 +148,7 @@ export default function ClientesPage() {
     }
 
     init()
-  }, [])
+  }, [hasCheckedAccess, canViewCustomers, canViewEvents])
 
   const filteredCustomers = useMemo(() => {
     const search = normalizeText(searchTerm)
@@ -140,16 +183,19 @@ export default function ClientesPage() {
   )
 
   function openNewCustomer() {
+    if (!canCreateCustomer) return
     setEditingCustomer(null)
     setIsModalOpen(true)
   }
 
   function openEditCustomer(customer: Customer) {
+    if (!canUpdateCustomer) return
     setEditingCustomer(customer)
     setIsModalOpen(true)
   }
 
   async function handleDeleteCustomer(customer: Customer) {
+    if (!canDeleteCustomer) return
     const confirmed = window.confirm(
       `Desativar o cliente "${customer.name}"? Ele não será removido dos pedidos antigos.`
     )
@@ -171,12 +217,29 @@ export default function ClientesPage() {
     await loadData()
   }
 
-  if (isLoading) {
+  if (!hasCheckedAccess || isLoading) {
     return (
       <div className="flex h-full items-center justify-center bg-background">
         <div className="flex items-center gap-2 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           Carregando clientes...
+        </div>
+      </div>
+    )
+  }
+
+  if (!canViewCustomers) {
+    return (
+      <div className="flex h-full items-center justify-center bg-background p-6">
+        <div className="max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted">
+            <Users className="h-7 w-7 text-muted-foreground" />
+          </div>
+          <h1 className="text-lg font-semibold text-foreground">Clientes oculto para este acesso</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Este usuário não possui a permissão <strong>customers.view</strong>.
+            Por isso a página não carrega a lista nem faz chamadas para a API.
+          </p>
         </div>
       </div>
     )
@@ -197,13 +260,15 @@ export default function ClientesPage() {
           </div>
         </div>
 
-        <button
-          onClick={openNewCustomer}
-          className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" />
-          Novo cliente
-        </button>
+        {canCreateCustomer && (
+          <button
+            onClick={openNewCustomer}
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" />
+            Novo cliente
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 border-b border-border bg-card/50 p-6 md:grid-cols-2 xl:grid-cols-4">
@@ -343,18 +408,22 @@ export default function ClientesPage() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => openEditCustomer(customer)}
-                        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteCustomer(customer)}
-                        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {canUpdateCustomer && (
+                        <button
+                          onClick={() => openEditCustomer(customer)}
+                          className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                      )}
+                      {canDeleteCustomer && (
+                        <button
+                          onClick={() => handleDeleteCustomer(customer)}
+                          className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -379,6 +448,9 @@ export default function ClientesPage() {
           events={events}
           isSaving={isSaving}
           setIsSaving={setIsSaving}
+          canCreateCustomer={canCreateCustomer}
+          canUpdateCustomer={canUpdateCustomer}
+          canLinkEventComanda={canUseEventComandas && canViewEvents}
           onSaved={handleSaved}
           onClose={() => {
             setIsModalOpen(false)
@@ -396,6 +468,9 @@ function CustomerModal({
   events,
   isSaving,
   setIsSaving,
+  canCreateCustomer,
+  canUpdateCustomer,
+  canLinkEventComanda,
   onSaved,
   onClose,
 }: {
@@ -404,6 +479,9 @@ function CustomerModal({
   events: EventDate[]
   isSaving: boolean
   setIsSaving: (value: boolean) => void
+  canCreateCustomer: boolean
+  canUpdateCustomer: boolean
+  canLinkEventComanda: boolean
   onSaved: () => void | Promise<void>
   onClose: () => void
 }) {
@@ -414,7 +492,9 @@ function CustomerModal({
   const [name, setName] = useState(customer?.name || '')
   const [phone, setPhone] = useState(customer?.phone || '')
   const [email, setEmail] = useState(customer?.email || '')
-  const [eventDateId, setEventDateId] = useState(activeEvent?.id ?? events[0]?.id ?? '')
+  const [eventDateId, setEventDateId] = useState(
+    canLinkEventComanda ? activeEvent?.id ?? events[0]?.id ?? '' : ''
+  )
   const [comandaNumber, setComandaNumber] = useState('')
   const [comandaName, setComandaName] = useState(customer?.name || '')
   const [searchExisting, setSearchExisting] = useState('')
@@ -543,6 +623,12 @@ function CustomerModal({
   }, [eventDateId, selectedExistingCustomer, comandaNumberEditedManually, customers])
 
   useEffect(() => {
+    if (!canLinkEventComanda) {
+      setComandaConflict(null)
+      setIsCheckingComanda(false)
+      return
+    }
+
     const parsedComanda = Number(comandaNumber)
     const currentCustomerId = customer?.id ?? selectedExistingCustomerId
 
@@ -610,6 +696,7 @@ function CustomerModal({
     customer?.id,
     selectedExistingCustomerId,
     comandaNameEditedManually,
+    canLinkEventComanda,
   ])
 
   async function handleSubmit(event: React.FormEvent) {
@@ -620,8 +707,20 @@ function CustomerModal({
       return
     }
 
+    const customerIdToUpdate = customer?.id ?? selectedExistingCustomerId
     const parsedComanda = Number(comandaNumber)
-    const shouldLinkComanda = eventDateId && Number.isInteger(parsedComanda) && parsedComanda > 0
+    const shouldLinkComanda =
+      canLinkEventComanda && eventDateId && Number.isInteger(parsedComanda) && parsedComanda > 0
+
+    if (customerIdToUpdate && !canUpdateCustomer && !shouldLinkComanda) {
+      alert('Você não tem permissão para editar clientes.')
+      return
+    }
+
+    if (!customerIdToUpdate && !canCreateCustomer) {
+      alert('Você não tem permissão para criar clientes.')
+      return
+    }
 
     if (shouldLinkComanda && comandaConflict) {
       alert(
@@ -635,19 +734,24 @@ function CustomerModal({
     try {
       setIsSaving(true)
 
-      const customerIdToUpdate = customer?.id ?? selectedExistingCustomerId
-
       const savedCustomer = customerIdToUpdate
-        ? await updateCustomer(customerIdToUpdate, {
-            name,
-            phone: phone || null,
-            email: email || null,
-          })
+        ? canUpdateCustomer
+          ? await updateCustomer(customerIdToUpdate, {
+              name,
+              phone: phone || null,
+              email: email || null,
+            })
+          : selectedExistingCustomer ?? customer
         : await createCustomer({
             name,
             phone: phone || null,
             email: email || null,
           })
+
+      if (!savedCustomer) {
+        alert('Cliente não encontrado para vincular a comanda.')
+        return
+      }
 
       if (shouldLinkComanda) {
         await upsertEventCustomerComanda({
@@ -695,7 +799,10 @@ function CustomerModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="grid max-h-[calc(92vh-73px)] grid-cols-1 overflow-hidden lg:grid-cols-[1fr_390px]">
+        <form
+          onSubmit={handleSubmit}
+          className={`grid max-h-[calc(92vh-73px)] grid-cols-1 overflow-hidden ${canLinkEventComanda ? 'lg:grid-cols-[1fr_390px]' : ''}`}
+        >
           <div className="space-y-5 overflow-y-auto p-6">
             {!customer && (
               <section className="rounded-2xl border border-border bg-background p-4">

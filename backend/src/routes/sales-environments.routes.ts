@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.middleware'
+import { requirePermission } from '../middleware/require-permission.middleware'
 import {
   getSalesEnvironments,
   createSalesEnvironment,
@@ -8,8 +9,23 @@ import {
 
 const router = Router()
 
-router.get('/', requireAuth, getSalesEnvironments)
-router.post('/', requireAuth, createSalesEnvironment)
-router.delete('/:id', requireAuth, deleteSalesEnvironment)
+router.get(
+  '/',
+  requireAuth,
+  requirePermission('salesEnvironments.view', 'pdv.view', 'interno.view', 'orders.create'),
+  getSalesEnvironments
+)
+router.post(
+  '/',
+  requireAuth,
+  requirePermission('salesEnvironments.manage'),
+  createSalesEnvironment
+)
+router.delete(
+  '/:id',
+  requireAuth,
+  requirePermission('salesEnvironments.manage'),
+  deleteSalesEnvironment
+)
 
 export default router

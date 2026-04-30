@@ -18,6 +18,8 @@ import staffEvaluationsRoutes from './routes/staff-evaluations.routes'
 import buysRoutes from './routes/buys.routes'
 import reportsRoutes from './routes/reports.routes'
 import router from './routes/product-cost-history.routes'
+import accessRoutes from './routes/access.routes'
+import auditRoutes from './routes/audit.routes'
 
 import { prisma } from './lib/prisma'
 
@@ -50,6 +52,8 @@ app.use('/staff-evaluations', staffEvaluationsRoutes)
 app.use('/buys', buysRoutes)
 app.use('/reports', reportsRoutes)
 app.use('/product-cost-history', router)
+app.use('/access', accessRoutes)
+app.use('/audit', auditRoutes)
 
 app.get('/health', async (_req, res) => {
   try {

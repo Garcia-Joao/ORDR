@@ -37,6 +37,9 @@ import {
   getCurrentEventDates,
   type EventDate,
 } from '@/lib/api/events'
+import { canAny, getStoredUser } from '@/lib/permissions'
+import { OrdrIcon } from '@/components/brand/ordr-brand'
+import type { AuthUser } from '@/lib/api/auth'
 import {
   getActiveEventDate,
   getActiveEventDateId,
@@ -133,6 +136,7 @@ export function AppToolbar({
   const [isLoadingBuyCart, setIsLoadingBuyCart] = useState(false)
   const [isSavingBuyCart, setIsSavingBuyCart] = useState(false)
   const [hasMounted, setHasMounted] = useState(false)
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
 
   const [products, setProducts] = useState<StockProduct[]>([])
   const [productSearch, setProductSearch] = useState('')
@@ -207,14 +211,18 @@ export function AppToolbar({
     })
   }, [buyCart?.items])
 
+  const canUseEvents = canAny(authUser, ['events.view', 'events.manage'])
+  const canUseBuyCart = canAny(authUser, ['stock.quickBuy', 'buys.manage'])
+  const canUseQuickStock = canAny(authUser, ['stock.adjust'])
+
   const activeEvent = useMemo(() => {
-    if (!hasMounted) return null
+    if (!hasMounted || !canUseEvents) return null
 
     return (
       currentEvents.find((eventDate) => eventDate.id === activeEventDateId) ??
       getActiveEventDate()
     )
-  }, [currentEvents, activeEventDateId, hasMounted])
+  }, [currentEvents, activeEventDateId, hasMounted, canUseEvents])
 
   function formatEventDateTimeRange(eventDate: EventDate) {
     const start = new Date(eventDate.startAt)
@@ -328,6 +336,31 @@ export function AppToolbar({
 
   useEffect(() => {
     setHasMounted(true)
+    setAuthUser(getStoredUser())
+
+    function handleUserUpdated() {
+      setAuthUser(getStoredUser())
+    }
+
+    window.addEventListener('storage', handleUserUpdated)
+    window.addEventListener('ordr-user-updated', handleUserUpdated)
+
+    return () => {
+      window.removeEventListener('storage', handleUserUpdated)
+      window.removeEventListener('ordr-user-updated', handleUserUpdated)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!hasMounted) return
+
+    if (!canUseEvents) {
+      setCurrentEvents([])
+      setActiveEventDateIdState(null)
+      setActiveEventDate(null)
+      return
+    }
+
     loadCurrentEvents()
 
     const timer = window.setInterval(() => {
@@ -344,7 +377,7 @@ export function AppToolbar({
       window.clearInterval(timer)
       window.removeEventListener(EVENTS_UPDATED_EVENT, handleEventsUpdated)
     }
-  }, [])
+  }, [hasMounted, canUseEvents])
 
   function handleActiveEventChange(eventDate: EventDate | null) {
     setActiveEventDateIdState(eventDate?.id ?? null)
@@ -353,6 +386,7 @@ export function AppToolbar({
   }
 
   async function openEventModal() {
+    if (!canUseEvents) return
     const storedActiveEvent = getActiveEventDate()
     const storedActiveEventId = getActiveEventDateId() ?? storedActiveEvent?.id ?? null
 
@@ -362,6 +396,7 @@ export function AppToolbar({
   }
 
   async function openStockModal() {
+    if (!canUseQuickStock) return
     setShowStockModal(true)
 
     if (products.length === 0) {
@@ -389,6 +424,7 @@ export function AppToolbar({
   }
 
   async function openBuyCartModal() {
+    if (!canUseBuyCart) return
     setShowBuyCartModal(true)
     await Promise.all([loadBuyCartData(), loadCurrentEvents({ preserveSelection: true })])
   }
@@ -633,59 +669,61 @@ export function AppToolbar({
   return (
     <>
       <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card shrink-0">
-        <div className="flex items-center gap-4 min-w-0">
-          <h1 className="text-lg font-semibold text-foreground truncate">
-            {title}
-          </h1>
-
+        <div className="flex items-center gap-3 min-w-0">
           {rightContent}
         </div>
 
         <div className="flex items-center gap-6">
-          <button
-            type="button"
-            onClick={openEventModal}
-            className="inline-flex h-9 max-w-[300px] items-center gap-2 rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground transition hover:bg-secondary"
-            title={
-              activeEvent
-                ? `Evento ativo: ${activeEvent.title} • ${formatEventDateTimeRange(activeEvent)}`
-                : 'Selecionar evento ativo'
-            }
-          >
-            <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
-            <span className="min-w-0 truncate">
-              {activeEvent ? activeEvent.title : 'Sem evento ativo'}
-            </span>
-            {activeEvent?.salesEnvironment?.name && (
-              <span className="hidden shrink-0 rounded-full border border-border bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground xl:inline">
-                {activeEvent.salesEnvironment.name}
+          {canUseEvents && (
+            <button
+              type="button"
+              onClick={openEventModal}
+              className="inline-flex h-9 max-w-[300px] items-center gap-2 rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground transition hover:bg-secondary"
+              title={
+                activeEvent
+                  ? `Evento ativo: ${activeEvent.title} • ${formatEventDateTimeRange(activeEvent)}`
+                  : 'Selecionar evento ativo'
+              }
+            >
+              <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
+              <span className="min-w-0 truncate">
+                {activeEvent ? activeEvent.title : 'Sem evento ativo'}
               </span>
-            )}
-          </button>
+              {activeEvent?.salesEnvironment?.name && (
+                <span className="hidden shrink-0 rounded-full border border-border bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground xl:inline">
+                  {activeEvent.salesEnvironment.name}
+                </span>
+              )}
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={openBuyCartModal}
-            className="inline-flex h-9 items-center gap-2 rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground transition hover:bg-secondary"
-            title="Carrinho de compras"
-          >
-            <ShoppingCart className="h-4 w-4 text-primary" />
-            Compras
-            {buyCart && buyCart.items.length > 0 && (
-              <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground">
-                {buyCart.items.length}
-              </span>
-            )}
-          </button>
+          {canUseBuyCart && (
+            <button
+              type="button"
+              onClick={openBuyCartModal}
+              className="inline-flex h-9 items-center gap-2 rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground transition hover:bg-secondary"
+              title="Carrinho de compras"
+            >
+              <ShoppingCart className="h-4 w-4 text-primary" />
+              Compras
+              {buyCart && buyCart.items.length > 0 && (
+                <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground">
+                  {buyCart.items.length}
+                </span>
+              )}
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={openStockModal}
-            className="inline-flex h-9 items-center gap-2 rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground transition hover:bg-secondary"
-          >
-            <PackagePlus className="h-4 w-4 text-primary" />
-            Estoque rápido
-          </button>
+          {canUseQuickStock && (
+            <button
+              type="button"
+              onClick={openStockModal}
+              className="inline-flex h-9 items-center gap-2 rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground transition hover:bg-secondary"
+            >
+              <PackagePlus className="h-4 w-4 text-primary" />
+              Estoque rápido
+            </button>
+          )}
 
           <div className="flex items-center gap-2">
             {isOnline ? (

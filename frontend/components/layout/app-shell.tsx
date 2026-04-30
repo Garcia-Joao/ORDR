@@ -6,6 +6,7 @@ import { Sidebar } from './sidebar'
 import { logout, me, updateMe } from '@/lib/api'
 import { AccountMenu } from './account-menu'
 import { AppToolbar } from './app-toolbar'
+import { OrdrLoading } from '@/components/ui/ordr-loading'
 import {
   EditAccountModal,
   type EditableAccountData,
@@ -28,6 +29,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [time, setTime] = useState<Date | null>(null)
   const [isOnline, setIsOnline] = useState(true)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [isCheckingSession, setIsCheckingSession] = useState(!isLogin)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isSavingAccount, setIsSavingAccount] = useState(false)
 
@@ -57,10 +59,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [isLogin])
 
   useEffect(() => {
-    if (isLogin) return
+    if (isLogin) {
+      setIsCheckingSession(false)
+      return
+    }
 
     async function loadSession() {
       try {
+        setIsCheckingSession(true)
+
         const result = await me()
 
         const mappedUser: ShellUser = {
@@ -73,20 +80,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         setCurrentUser(mappedUser)
         localStorage.setItem('ordr-user', JSON.stringify(result.user))
+        window.dispatchEvent(new Event('ordr-user-updated'))
       } catch {
         localStorage.removeItem('ordr-user')
+        window.dispatchEvent(new Event('ordr-user-updated'))
         router.push('/login')
+      } finally {
+        setIsCheckingSession(false)
       }
     }
 
     loadSession()
-  }, [isLogin, pathname, router])
+  }, [isLogin, router])
 
   const handleLogout = useCallback(async () => {
     try {
       setIsLoggingOut(true)
       await logout()
       localStorage.removeItem('ordr-user')
+      window.dispatchEvent(new Event('ordr-user-updated'))
       setCurrentUser(null)
       window.location.href = '/login'
     } catch (error) {
@@ -121,6 +133,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       })
 
       localStorage.setItem('ordr-user', JSON.stringify(result.user))
+      window.dispatchEvent(new Event('ordr-user-updated'))
       setIsEditModalOpen(false)
     } catch (error) {
       console.error('Erro ao salvar conta:', error)
@@ -140,6 +153,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (pathname.startsWith('/pessoas')) return 'Pessoas'
     if (pathname.startsWith('/eventos')) return 'Eventos'
     if (pathname.startsWith('/compras')) return 'Compras'
+    if (pathname.startsWith('/acessos')) return 'Acessos'
+    if (pathname.startsWith('/auditoria')) return 'Auditoria'
     return 'Ordr'
   }, [pathname])
 
@@ -159,6 +174,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   if (isLogin) {
     return <>{children}</>
+  }
+
+  if (isCheckingSession) {
+    return <OrdrLoading label="Carregando ORDR..." />
   }
 
   return (

@@ -16,6 +16,8 @@ import {
 import type { Order, OrderItem } from '@/lib/pos-types'
 import { formatBRL, getItemPrice } from '@/lib/pos-types'
 import { cancelOrder, getOrders } from '@/lib/api/orders'
+import { canAny, getStoredUser } from '@/lib/permissions'
+import type { AuthUser } from '@/lib/api/auth'
 
 const statusConfig = {
   pending: {
@@ -101,9 +103,27 @@ export default function PedidosPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [fromDate, setFromDate] = useState(() => toDateInputValue(new Date()))
   const [toDate, setToDate] = useState(() => toDateInputValue(new Date()))
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+
+  const canCancelOrder = canAny(authUser, ['orders.cancel'])
 
   const fromDateRef = useRef<HTMLInputElement>(null)
   const toDateRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    function syncStoredUser() {
+      setAuthUser(getStoredUser())
+    }
+
+    syncStoredUser()
+    window.addEventListener('storage', syncStoredUser)
+    window.addEventListener('ordr-user-updated', syncStoredUser)
+
+    return () => {
+      window.removeEventListener('storage', syncStoredUser)
+      window.removeEventListener('ordr-user-updated', syncStoredUser)
+    }
+  }, [])
 
   useEffect(() => {
     async function loadData() {
@@ -166,7 +186,7 @@ export default function PedidosPage() {
     : null
 
   const handleCancelOrder = async () => {
-    if (!selectedOrder || selectedOrder.status === 'cancelled') return
+    if (!selectedOrder || selectedOrder.status === 'cancelled' || !canCancelOrder) return
 
     const confirmed = window.confirm(
       `Deseja cancelar o pedido #${selectedOrder.id}?`
@@ -474,7 +494,7 @@ export default function PedidosPage() {
                       </p>
                     </div>
 
-                    {selectedOrder.status !== 'cancelled' && (
+                    {selectedOrder.status !== 'cancelled' && canCancelOrder && (
                       <button
                         onClick={handleCancelOrder}
                         disabled={isCancelling}

@@ -15,27 +15,31 @@ import {
   updateEventDatePersonStatusController,
   updateEventTemplateController,
 } from '../controllers/events.controller'
+import { requireAuth } from '../middleware/auth.middleware'
+import { requirePermission } from '../middleware/require-permission.middleware'
 
 const router = Router()
 
-router.get('/people', listEventPeopleController)
+router.get('/people', requireAuth, requirePermission('events.view'), listEventPeopleController)
 
-router.get('/templates', listEventTemplatesController)
-router.get('/templates/:id', getEventTemplateController)
-router.post('/templates', createEventTemplateController)
-router.patch('/templates/:id', updateEventTemplateController)
-router.delete('/templates/:id', deleteEventTemplateController)
+router.get('/templates', requireAuth, requirePermission('events.view'), listEventTemplatesController)
+router.get('/templates/:id', requireAuth, requirePermission('events.view'), getEventTemplateController)
+router.post('/templates', requireAuth, requirePermission('events.manage'), createEventTemplateController)
+router.patch('/templates/:id', requireAuth, requirePermission('events.manage'), updateEventTemplateController)
+router.delete('/templates/:id', requireAuth, requirePermission('events.manage'), deleteEventTemplateController)
 
-router.get('/dates', listEventDatesController)
-router.get('/dates/current', listCurrentEventDatesController)
-router.get('/dates/:id', getEventDateController)
-router.post('/dates', createEventDateController)
-router.patch('/dates/:id', updateEventDateController)
-router.patch('/dates/:id/cancel', cancelEventDateController)
-router.delete('/dates/:id', deleteEventDateController)
+router.get('/dates', requireAuth, requirePermission('events.view', 'events.active.select', 'events.active.assign', 'customers.eventComanda.manage', 'pdv.view', 'orders.create', 'stock.quickBuy', 'buys.manage'), listEventDatesController)
+router.get('/dates/current', requireAuth, requirePermission('events.view', 'events.active.select', 'events.active.assign', 'customers.eventComanda.manage', 'pdv.view', 'orders.create', 'stock.quickBuy', 'buys.manage'), listCurrentEventDatesController)
+router.get('/dates/:id', requireAuth, requirePermission('events.view', 'events.active.select', 'events.active.assign', 'customers.eventComanda.manage'), getEventDateController)
+router.post('/dates', requireAuth, requirePermission('events.manage'), createEventDateController)
+router.patch('/dates/:id', requireAuth, requirePermission('events.manage'), updateEventDateController)
+router.patch('/dates/:id/cancel', requireAuth, requirePermission('events.manage'), cancelEventDateController)
+router.delete('/dates/:id', requireAuth, requirePermission('events.manage'), deleteEventDateController)
 
 router.patch(
   '/dates/:id/people/:personId/status',
+  requireAuth,
+  requirePermission('events.manage'),
   updateEventDatePersonStatusController
 )
 

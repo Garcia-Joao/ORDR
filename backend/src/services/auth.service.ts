@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { prisma } from '../lib/prisma'
+import { ALL_PERMISSION_KEYS } from '../auth/permissions'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-this'
 
@@ -9,6 +10,11 @@ type SafeCompany = {
   name: string
   isTest: boolean
   role: string
+  systemRole: 'ADMIN' | 'CUSTOM'
+  customRoleId: string | null
+  customRoleName: string | null
+  activeEventDateId: string | null
+  permissions: string[]
 }
 
 export type SafeUser = {
@@ -18,6 +24,11 @@ export type SafeUser = {
   phone: string | null
   photoBase64: string | null
   role: string
+  systemRole: 'ADMIN' | 'CUSTOM'
+  customRoleId: string | null
+  customRoleName: string | null
+  activeEventDateId: string | null
+  permissions: string[]
   companyId: string
   companies: SafeCompany[]
 }
@@ -32,6 +43,15 @@ type UserWithMemberships = {
   role: any
   memberships: Array<{
     role: any
+    systemRole?: any
+    customRoleId?: string | null
+    customRole?: {
+      id: string
+      name: string
+      active: boolean
+      permissions: Array<{ permissionKey: string }>
+    } | null
+    activeEventDateId?: string | null
     company: {
       id: string
       name: string
@@ -40,30 +60,67 @@ type UserWithMemberships = {
   }>
 }
 
+function membershipPermissions(
+  membership: UserWithMemberships['memberships'][number]
+) {
+  const systemRole = String(membership.systemRole ?? 'ADMIN') as 'ADMIN' | 'CUSTOM'
+
+  if (systemRole === 'ADMIN') return ALL_PERMISSION_KEYS
+
+  if (!membership.customRole?.active) return []
+
+  return membership.customRole.permissions.map(
+    (permission) => permission.permissionKey
+  )
+}
+
 function toSafeUser(user: UserWithMemberships, activeCompanyId: string): SafeUser {
+  const activeMembership =
+    user.memberships.find(
+      (membership) => membership.company.id === activeCompanyId
+    ) ?? user.memberships[0]
+
+  const activeSystemRole = String(
+    activeMembership?.systemRole ?? 'ADMIN'
+  ) as 'ADMIN' | 'CUSTOM'
+  const activePermissions = activeMembership
+    ? membershipPermissions(activeMembership)
+    : []
+
   return {
     id: user.id,
     username: user.username,
     name: user.name ?? null,
     phone: user.phone ?? null,
     photoBase64: user.photoBase64 ?? null,
-    role: String(user.role),
+    role: String(activeMembership?.role ?? user.role),
+    systemRole: activeSystemRole,
+    customRoleId: activeMembership?.customRoleId ?? null,
+    customRoleName: activeMembership?.customRole?.name ?? null,
+    activeEventDateId: activeMembership?.activeEventDateId ?? null,
+    permissions: activePermissions,
     companyId: activeCompanyId,
     companies: user.memberships.map((membership) => ({
       id: membership.company.id,
       name: membership.company.name,
       isTest: membership.company.isTest,
       role: String(membership.role),
+      systemRole: String(membership.systemRole ?? 'ADMIN') as 'ADMIN' | 'CUSTOM',
+      customRoleId: membership.customRoleId ?? null,
+      customRoleName: membership.customRole?.name ?? null,
+      activeEventDateId: membership.activeEventDateId ?? null,
+      permissions: membershipPermissions(membership),
     })),
   }
 }
+
 
 export async function loginUser(username: string, password: string) {
   const user = await prisma.user.findUnique({
     where: { username },
     include: {
       memberships: {
-        include: { company: true },
+        include: { company: true, customRole: { include: { permissions: true } } },
         orderBy: { createdAt: 'asc' },
       },
     },
@@ -115,7 +172,7 @@ export async function getUserFromToken(token: string) {
     where: { id: decoded.sub },
     include: {
       memberships: {
-        include: { company: true },
+        include: { company: true, customRole: { include: { permissions: true } } },
         orderBy: { createdAt: 'asc' },
       },
     },
@@ -141,7 +198,7 @@ export async function switchUserCompany(userId: string, companyId: string) {
     where: { id: userId },
     include: {
       memberships: {
-        include: { company: true },
+        include: { company: true, customRole: { include: { permissions: true } } },
       },
     },
   })
@@ -180,7 +237,7 @@ export async function switchUserCompany(userId: string, companyId: string) {
 export async function getCompaniesForUser(userId: string) {
   const memberships = await prisma.userCompany.findMany({
     where: { userId },
-    include: { company: true },
+    include: { company: true, customRole: { include: { permissions: true } } },
     orderBy: { createdAt: 'asc' },
   })
 
@@ -189,6 +246,10 @@ export async function getCompaniesForUser(userId: string) {
     name: membership.company.name,
     isTest: membership.company.isTest,
     role: String(membership.role),
+    systemRole: String(membership.systemRole ?? 'ADMIN') as 'ADMIN' | 'CUSTOM',
+    customRoleId: membership.customRoleId ?? null,
+    customRoleName: membership.customRole?.name ?? null,
+    permissions: membershipPermissions(membership as any),
   }))
 }
 
@@ -207,7 +268,7 @@ export async function updateMyAccount(input: UpdateMyAccountInput) {
     where: { id: input.userId },
     include: {
       memberships: {
-        include: { company: true },
+        include: { company: true, customRole: { include: { permissions: true } } },
         orderBy: { createdAt: 'asc' },
       },
     },
@@ -311,7 +372,7 @@ export async function updateMyAccount(input: UpdateMyAccountInput) {
     data,
     include: {
       memberships: {
-        include: { company: true },
+        include: { company: true, customRole: { include: { permissions: true } } },
         orderBy: { createdAt: 'asc' },
       },
     },
